@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-
 <plugin xmlns="http://www.phonegap.com/ns/plugins/1.0" xmlns:m2="http://schemas.microsoft.com/appx/2013/manifest" xmlns:android="http://schemas.android.com/apk/res/android" id="cordova-plugin-geofence" version="0.8.0">
     <name>geofence</name>
     <description>Geofence plugin</description>
@@ -20,7 +19,6 @@
     </js-module>
 
     <dependency id="cordova-plugin-add-swift-support" version="2.0.2" />
-    <dependency id="cordova-plugin-compat" version="1.2.0" />
     <dependency id="es6-promise-plugin" />
 
     <!-- android -->
@@ -46,11 +44,10 @@
         <source-file src="src/android/ReceiveTransitionsReceiver.java" target-dir="src/com/cowbell/cordova/geofence" />
 		<source-file src="src/android/TransitionJobService.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/RemoveGeofenceCommand.java" target-dir="src/com/cowbell/cordova/geofence" />
-
-		<preference name="GOOGLE_API_VERSION" default="11.8.0" />
+		<preference name="GOOGLE_API_VERSION" default="17.0.0" />
+        <preference name="ANDROID_GSON_VERSION" default="2.9.0" />
 		<framework src="com.google.android.gms:play-services-location:$GOOGLE_API_VERSION"/>
-        <lib-file src="src/android/libs/gson-2.3.jar" />
-
+        <framework src="com.google.code.gson:gson:$ANDROID_GSON_VERSION" />
         <config-file target="config.xml" parent="/*">
             <feature name="GeofencePlugin">
                 <param name="android-package" value="com.cowbell.cordova.geofence.GeofencePlugin" />
@@ -58,17 +55,17 @@
         </config-file>
 
         <config-file target="AndroidManifest.xml" parent="/manifest/application">
-            <receiver android:exported="true" android:label="@string/app_name" 						android:name="com.cowbell.cordova.geofence.ReceiveTransitionsReceiver" />
+            <receiver android:exported="true" android:label="@string/app_name" android:name="com.cowbell.cordova.geofence.ReceiveTransitionsReceiver" />
         </config-file>
 
         <config-file target="AndroidManifest.xml" parent="/manifest/application">
-            <receiver android:name="com.cowbell.cordova.geofence.BootReceiver">
+            <receiver android:exported="true" android:name="com.cowbell.cordova.geofence.BootReceiver">
                 <intent-filter>
                     <action android:name="android.intent.action.BOOT_COMPLETED" />
                 </intent-filter>
             </receiver>
         </config-file>
-		
+
 		<config-file target="AndroidManifest.xml" parent="/manifest/application">
 			<service
 		        android:name="com.cowbell.cordova.geofence.TransitionJobService"
@@ -76,7 +73,7 @@
 		        android:exported="true">
 		    </service>
 		</config-file>
-		
+
         <config-file target="AndroidManifest.xml" parent="/manifest">
             <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
             <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
