@@ -106,11 +106,11 @@ public class GeoNotificationManager {
      * Create a PendingIntent that triggers an IntentService in your app when a
      * geofence transition occurs. 
      */
-    private PendingIntent getTransitionPendingIntent() {    
+    private PendingIntent getTransitionPendingIntent() {
         Intent intent = new Intent(context, ReceiveTransitionsReceiver.class);
         //intent.setAction(ReceiveTransitionsReceiver.GeofenceTransitionIntent);
         logger.log(Log.DEBUG, "Geofence broadcast intent created");
         // https://stackoverflow.com/questions/67045607/how-to-resolve-missing-pendingintent-mutability-flag-lint-warning-in-android-a
         return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
-    }     
+    }
 }
