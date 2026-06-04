@@ -5,8 +5,7 @@ import android.content.Context;
 import androidx.annotation.NonNull;
 import android.util.Log;
 
-import com.google.android.gms.common.api.ResultCallback;
-import com.google.android.gms.common.api.Status;
+import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.location.Geofence;
 import com.google.android.gms.location.GeofenceStatusCodes;
 import com.google.android.gms.location.GeofencingClient;
@@ -60,8 +59,10 @@ public class AddGeofenceCommand extends AbstractGoogleServiceCommand {
                                     errorCodeMap.put(GeofenceStatusCodes.GEOFENCE_NOT_AVAILABLE, GeofencePlugin.ERROR_GEOFENCE_NOT_AVAILABLE);
                                     errorCodeMap.put(GeofenceStatusCodes.GEOFENCE_TOO_MANY_GEOFENCES, GeofencePlugin.ERROR_GEOFENCE_LIMIT_EXCEEDED);
 
-                                    //Integer statusCode = status.getStatusCode();
-                                    String message = "Adding geofences failed - Exception.Message: " + e.getMessage();
+                                    int statusCode = (e instanceof ApiException)
+                                            ? ((ApiException) e).getStatusCode() : -1;
+                                    String message = "Adding geofences failed - statusCode: " + statusCode
+                                            + " message: " + e.getMessage();
                                     JSONObject error = new JSONObject();
                                     error.put("message", message);
 
