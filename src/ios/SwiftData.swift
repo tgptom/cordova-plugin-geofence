@@ -123,7 +123,7 @@ public struct SwiftData {
             for sqlStr in sqlArr {
                 if let err = SQLiteDB.shared.executeChange(sqlStr) {
                     SQLiteDB.shared.close()
-                    if let index = sqlArr.index(of: sqlStr) {//find(sqlArr, sqlStr) {
+                    if let index = sqlArr.firstIndex(of: sqlStr) {//find(sqlArr, sqlStr) {
                         print("Error occurred on array item: \(index) -> \"\(sqlStr)\"")
                     }
                     error = err
@@ -633,7 +633,7 @@ public struct SwiftData {
         }
         let imageID = UUID().uuidString
         let imageUrl = dirUrl.appendingPathComponent(imageID);
-        let imageAsData = UIImagePNGRepresentation(image)
+        let imageAsData = image.pngData()
         if let _ = imageAsData  {
             if !((try? imageAsData!.write(to: imageUrl, options: [.atomic])) != nil) {
                 print("Error saving image")
