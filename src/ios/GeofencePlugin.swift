@@ -9,6 +9,7 @@
 import Foundation
 import WebKit
 import UserNotifications
+import CoreLocation
 
 let TAG = "GeofencePlugin"
 
@@ -62,10 +63,10 @@ func log(_ messages: [String]) {
         let result: CDVPluginResult
         
         if ok {
-            result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: warnings.joined(separator: "\n"))
+            result = CDVPluginResult(status: CDVCommandStatus.ok, messageAs: warnings.joined(separator: "\n"))
         } else {
             result = CDVPluginResult(
-                status: CDVCommandStatus_ILLEGAL_ACCESS_EXCEPTION,
+                status: CDVCommandStatus.illegalAccessException,
                 messageAs: (errors + warnings).joined(separator: "\n")
             )
         }
@@ -74,13 +75,13 @@ func log(_ messages: [String]) {
     }
     
     @objc func deviceReady(_ command: CDVInvokedUrlCommand) {
-        let pluginResult = CDVPluginResult(status: CDVCommandStatus_OK)
+        let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
         commandDelegate!.send(pluginResult, callbackId: command.callbackId)
     }
     
     @objc func ping(_ command: CDVInvokedUrlCommand) {
         log("Ping")
-        let pluginResult = CDVPluginResult(status: CDVCommandStatus_OK)
+        let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
         commandDelegate!.send(pluginResult, callbackId: command.callbackId)
     }
     
@@ -98,7 +99,7 @@ func log(_ messages: [String]) {
                 self.geoNotificationManager.addOrUpdateGeoNotification(JSON(geo))
             }
             DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus_OK)
+                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
                 self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
             }
         }
@@ -109,7 +110,7 @@ func log(_ messages: [String]) {
             let watched = self.geoNotificationManager.getWatchedGeoNotifications()!
             let watchedJsonString = watched.description
             DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: watchedJsonString)
+                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok, messageAs: watchedJsonString)
                 self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
             }
         }
@@ -121,7 +122,7 @@ func log(_ messages: [String]) {
                 self.geoNotificationManager.removeGeoNotification(id as! String)
             }
             DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus_OK)
+                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
                 self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
             }
         }
@@ -131,7 +132,7 @@ func log(_ messages: [String]) {
         DispatchQueue.global(qos: priority).async {
             self.geoNotificationManager.removeAllGeoNotifications()
             DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus_OK)
+                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
                 self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
             }
         }
@@ -145,7 +146,7 @@ func log(_ messages: [String]) {
                 self.geoNotificationManager.snoozeFence(String(id), duration: Double(duration))
             }
             DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus_OK)
+                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
                 self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
             }
         }
@@ -158,7 +159,7 @@ func log(_ messages: [String]) {
                 self.geoNotificationManager.dismissNotifications(ids.map { String($0) })
             }
             DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus_OK)
+                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
                 self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
             }
         }
@@ -576,10 +577,18 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         if notification.request.content.userInfo["geofence.notification.data"] != nil {
             // Play sound and show alert to the user if it is a geofence notification
-            completionHandler([.banner, .sound])
+            if #available(iOS 14.0, *) {
+                completionHandler([.banner, .sound])
+            } else {
+                completionHandler([.alert, .sound])
+            }
         } else if (notification.request.content.userInfo["foreground"] != nil) {
             // Play sound and show alert to the user if the notification has foreground property
-            completionHandler([.banner, .sound])
+            if #available(iOS 14.0, *) {
+                completionHandler([.banner, .sound])
+            } else {
+                completionHandler([.alert, .sound])
+            }
         } else {
             completionHandler([])
         }
