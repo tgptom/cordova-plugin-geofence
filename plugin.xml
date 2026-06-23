@@ -72,6 +72,10 @@
 		    </service>
 		</config-file>
 
+        <config-file target="AndroidManifest.xml" parent="/*">
+            <manifest xmlns:tools="http://schemas.android.com/tools" />
+        </config-file>
+
         <config-file target="AndroidManifest.xml" parent="/manifest">
             <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
             <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
