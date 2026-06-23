@@ -72,16 +72,12 @@
 		    </service>
 		</config-file>
 
-        <config-file target="AndroidManifest.xml" parent="/*">
-            <manifest xmlns:tools="http://schemas.android.com/tools" />
-        </config-file>
-
         <config-file target="AndroidManifest.xml" parent="/manifest">
             <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
             <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
             <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
             <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-            <uses-permission android:maxSdkVersion="32" android:name="android.permission.VIBRATE" tools:node="replace" />
+            <uses-permission xmlns:tools="http://schemas.android.com/tools" android:maxSdkVersion="32" android:name="android.permission.VIBRATE" tools:node="replace" />
             <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
         </config-file>
 
