@@ -49,7 +49,7 @@ func log(_ messages: [String]) {
         // faker.start()
         
         promptForNotificationPermission()
-		// comment to remove permission
+		// comment to remove permissions
          geoNotificationManager.registerPermissions()
         geoNotificationManager.isActive = true
         geoNotificationManager.startUpdatingLocation()
@@ -260,7 +260,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         
-		// comment to revove permissions
+		// comment to remove permissions
          locationManager.requestAlwaysAuthorization()
         UNUserNotificationCenter.current().delegate = self
     }
