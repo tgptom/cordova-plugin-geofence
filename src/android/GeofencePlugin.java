@@ -1,6 +1,5 @@
 package com.cowbell.cordova.geofence;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -155,6 +154,9 @@ public class GeofencePlugin extends CordovaPlugin {
         if (android.os.Build.VERSION.SDK_INT > 28) {
             permissionList.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
         }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            permissionList.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
         String[] permissions = permissionList.toArray(new String[0]);
         if (!hasPermissions(permissions)) {
             PermissionHelper.requestPermissions(this, 0, permissions);
@@ -197,18 +199,15 @@ public class GeofencePlugin extends CordovaPlugin {
     }
 
     private static synchronized void sendJavascript(final String js) {
-
         if (webView == null) {
             Log.e(TAG, "Device isn't ready.");
             return;
         }
 
         final CordovaWebView view = webView.get();
-
-        ((Activity)(view.getContext())).runOnUiThread(new Runnable() {
-            public void run() {
-                view.loadUrl("javascript:" + js);
-            }
-        });
+        if (view == null) {
+            return;
+        }
+        view.sendJavascript(js);
     }
 }
