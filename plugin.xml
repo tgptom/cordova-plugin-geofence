@@ -19,8 +19,6 @@
         <clobbers target="geofence" />
     </js-module>
 
-    <dependency id="es6-promise-plugin" />
-
     <!-- android -->
     <platform name="android">
         <source-file src="src/android/AbstractGoogleServiceCommand.java" target-dir="src/com/cowbell/cordova/geofence" />
