@@ -50,9 +50,9 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
         // TODO: refactor this, too long
         // First check for errors
         GeofencingEvent geofencingEvent = GeofencingEvent.fromIntent(intent);
-        if (geofencingEvent.hasError()) {
+        if (geofencingEvent == null || geofencingEvent.hasError()) {
             // Get the error code with a static method
-            int errorCode = geofencingEvent.getErrorCode();
+            int errorCode = geofencingEvent != null ? geofencingEvent.getErrorCode() : -1;
             String error = "Location Services error: " + Integer.toString(errorCode);
             // Log the error
             logger.log(Log.ERROR, error);
@@ -62,6 +62,9 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
             int transitionType = geofencingEvent.getGeofenceTransition();
 
             List<Geofence> triggerList = geofencingEvent.getTriggeringGeofences();
+            if (triggerList == null) {
+                return;
+            }
             List<GeoNotification> geoNotifications = new ArrayList<>();
             for (Geofence fence : triggerList) {
                 String fenceId = fence.getRequestId();

@@ -7,12 +7,10 @@
 //
 
 import Foundation
-import AudioToolbox
 import WebKit
 import UserNotifications
 
 let TAG = "GeofencePlugin"
-let iOS8 = floor(NSFoundationVersionNumber) > floor(NSFoundationVersionNumber_iOS_7_1)
 
 func log(_ message: String){
     NSLog("%@ - %@", TAG, message)
@@ -24,7 +22,6 @@ func log(_ messages: [String]) {
     }
 }
 
-@available(iOS 8.0, *)
 @objc(HWPGeofencePlugin) class GeofencePlugin : CDVPlugin {
     lazy var geoNotificationManager = GeoNotificationManager()
     let priority = DispatchQoS.QoSClass.default
@@ -51,11 +48,9 @@ func log(_ messages: [String]) {
         // let faker = GeofenceFaker(manager: geoNotificationManager)
         // faker.start()
         
-        if iOS8 {
-            promptForNotificationPermission()
-			// comment to remove permission
-             geoNotificationManager.registerPermissions()
-        }
+        promptForNotificationPermission()
+		// comment to remove permissions
+         geoNotificationManager.registerPermissions()
         geoNotificationManager.isActive = true
         geoNotificationManager.startUpdatingLocation()
 
@@ -90,11 +85,11 @@ func log(_ messages: [String]) {
     }
     
     @objc func promptForNotificationPermission() {
-        UIApplication.shared.registerUserNotificationSettings(UIUserNotificationSettings(
-            types: [UIUserNotificationType.sound, UIUserNotificationType.alert, UIUserNotificationType.badge],
-            categories: nil
-            )
-        )
+        UNUserNotificationCenter.current().requestAuthorization(options: [.sound, .alert, .badge]) { granted, error in
+            if let error = error {
+                log("Notification permission error: \(error.localizedDescription)")
+            }
+        }
     }
     
     @objc func addOrUpdate(_ command: CDVInvokedUrlCommand) {
@@ -181,10 +176,7 @@ func log(_ messages: [String]) {
     @objc func didReceiveLocalNotification (_ notification: Notification) {
         log("didReceiveLocalNotification")
         var data = "undefined"
-        if let uiNotification = notification.object as? UILocalNotification,
-            let notificationData = uiNotification.userInfo?["geofence.notification.data"] as? String {
-            data = notificationData
-        } else if let geoNotificationString = notification.object as? String {
+        if let geoNotificationString = notification.object as? String {
             data = geoNotificationString
         }
         
@@ -214,7 +206,6 @@ func log(_ messages: [String]) {
 }
 
 // class for faking crossing geofences
-@available(iOS 8.0, *)
 class GeofenceFaker {
     let priority = DispatchQoS.QoSClass.default
     let geoNotificationManager: GeoNotificationManager
@@ -257,7 +248,6 @@ class GeofenceFaker {
     }
 }
 
-@available(iOS 8.0, *)
 class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotificationCenterDelegate {
     let locationManager = CLLocationManager()
     let store = GeoNotificationStore()
@@ -270,14 +260,9 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         
-        if iOS8 {
-			// comment to revove permissions
-             locationManager.requestAlwaysAuthorization()
-        }
-        
-        if #available(iOS 10.0, *) {
-            UNUserNotificationCenter.current().delegate = self
-        }
+		// comment to remove permissions
+         locationManager.requestAlwaysAuthorization()
+        UNUserNotificationCenter.current().delegate = self
     }
     
     func registerPermissions() {
@@ -333,7 +318,12 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             errors.append("Error: Locationservices not enabled")
         }
         
-        let authStatus = CLLocationManager.authorizationStatus()
+        let authStatus: CLAuthorizationStatus
+        if #available(iOS 14.0, *) {
+            authStatus = locationManager.authorizationStatus
+        } else {
+            authStatus = CLLocationManager.authorizationStatus()
+        }
 
         if authStatus != .authorizedAlways {
             if authStatus != .authorizedWhenInUse {
@@ -343,25 +333,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             }
         }
         
-        if iOS8 {
-            if let notificationSettings = UIApplication.shared.currentUserNotificationSettings {
-                if notificationSettings.types == UIUserNotificationType() {
-                    errors.append("Error: notification permission missing")
-                } else {
-                    if !notificationSettings.types.contains(.sound) {
-                        warnings.append("Warning: notification settings - sound permission missing")
-                    }
-                    if !notificationSettings.types.contains(.alert) {
-                        warnings.append("Warning: notification settings - alert permission missing")
-                    }
-                    if !notificationSettings.types.contains(.badge) {
-                        warnings.append("Warning: notification settings - badge permission missing")
-                    }
-                }
-            } else {
-                errors.append("Error: notification permission missing")
-            }
-        }
+        // Notification permissions are managed asynchronously through UNUserNotificationCenter.
         let ok = (errors.count == 0)
         return (ok, warnings, errors)
     }
@@ -488,56 +460,30 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     }
     
     func notifyAbout(_ geo: JSON) {
-        if #available(iOS 10.0, *) {
-            log("Creating notification iOS > 10")
-            let content = UNMutableNotificationContent()
-            if let title = geo["notification"]["title"] as JSON? {
-                content.title = title.stringValue
-            }
-            if let text = geo["notification"]["text"] as JSON? {
-                content.body = text.stringValue
-            }
-            content.sound = UNNotificationSound.default()
-            if let json = geo["notification"]["data"] as JSON? {
-                content.userInfo = ["geofence.notification.data": json.rawString(String.Encoding.utf8.rawValue, options: [])!]
-            }
-            let identifier = geo["notification"]["id"].stringValue
-            let request = UNNotificationRequest(identifier: identifier,
-                                                content: content, trigger: nil)
-            UNUserNotificationCenter.current().add(request, withCompletionHandler: { (error) in
-                if error != nil {
-                    log("Couldn't create notification")
-                }
-            })
-        } else {
-            log("Creating notification iOS < 10")
-            let notification = UILocalNotification()
-            notification.timeZone = TimeZone.current
-            let dateTime = Date()
-            notification.fireDate = dateTime
-            notification.soundName = UILocalNotificationDefaultSoundName
-            if let title = geo["notification"]["title"] as JSON? {
-                notification.alertTitle = title.stringValue
-            }
-            if let text = geo["notification"]["text"] as JSON? {
-                notification.alertBody = text.stringValue
-            }
-            if let json = geo["notification"]["data"] as JSON? {
-                notification.userInfo = ["geofence.notification.data": json.rawString(String.Encoding.utf8.rawValue, options: [])!]
-            }
-            UIApplication.shared.scheduleLocalNotification(notification)
-            if let vibrate = geo["notification"]["vibrate"].array {
-                if (!vibrate.isEmpty && vibrate[0].intValue > 0) {
-                    AudioServicesPlayAlertSound(SystemSoundID(kSystemSoundID_Vibrate))
-                }
-            }
+        log("Creating notification")
+        let content = UNMutableNotificationContent()
+        if let title = geo["notification"]["title"] as JSON? {
+            content.title = title.stringValue
         }
+        if let text = geo["notification"]["text"] as JSON? {
+            content.body = text.stringValue
+        }
+        content.sound = UNNotificationSound.default
+        if let json = geo["notification"]["data"] as JSON? {
+            content.userInfo = ["geofence.notification.data": json.rawString(String.Encoding.utf8.rawValue, options: [])!]
+        }
+        let identifier = geo["notification"]["id"].stringValue
+        let request = UNNotificationRequest(identifier: identifier,
+                                            content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request, withCompletionHandler: { (error) in
+            if error != nil {
+                log("Couldn't create notification")
+            }
+        })
     }
     
     func dismissNotifications(_ ids: [String]) {
-        if #available(iOS 10.0, *) {
-            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
-        }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
     }
     
     func snoozeFence(_ id: String, duration: Double) {
@@ -630,10 +576,10 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         if notification.request.content.userInfo["geofence.notification.data"] != nil {
             // Play sound and show alert to the user if it is a geofence notification
-            completionHandler([.alert,.sound])
+            completionHandler([.banner, .sound])
         } else if (notification.request.content.userInfo["foreground"] != nil) {
             // Play sound and show alert to the user if the notification has foreground property
-            completionHandler([.alert,.sound])
+            completionHandler([.banner, .sound])
         } else {
             completionHandler([])
         }
