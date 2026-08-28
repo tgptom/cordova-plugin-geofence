@@ -17,10 +17,13 @@ import java.util.Date;
 public class GeofenceTrackingCoordinator extends BroadcastReceiver {
     private static final String ACTION_DELAYED_EXIT =
             "com.cowbell.cordova.geofence.DELAYED_EXIT";
+        private static final String ACTION_WINDOW_START =
+            "com.cowbell.cordova.geofence.WINDOW_START";
     private static final String ACTION_WINDOW_EXPIRATION =
             "com.cowbell.cordova.geofence.WINDOW_EXPIRATION";
     private static final int DELAYED_EXIT_REQUEST_CODE = 41001;
     private static final int WINDOW_EXPIRATION_REQUEST_CODE = 41002;
+        private static final int WINDOW_START_REQUEST_CODE = 41003;
     private static final long EXIT_DELAY_MILLIS = 30000;
 
     public static void handleTransition(Context context, int transitionType) {
@@ -45,23 +48,35 @@ public class GeofenceTrackingCoordinator extends BroadcastReceiver {
                 DELAYED_EXIT_REQUEST_CODE, EXIT_DELAY_MILLIS);
     }
 
-    public static void refreshWindowExpiration(Context context) {
+    public static void refreshWindowBoundaries(Context context) {
         Context applicationContext = context.getApplicationContext();
+        cancelAlarm(applicationContext, ACTION_WINDOW_START,
+                WINDOW_START_REQUEST_CODE);
         cancelAlarm(applicationContext, ACTION_WINDOW_EXPIRATION,
                 WINDOW_EXPIRATION_REQUEST_CODE);
 
         long now = System.currentTimeMillis();
+        Long nextStart = null;
         Long nextExpiration = null;
         GeoNotificationStore store = new GeoNotificationStore(applicationContext);
         for (GeoNotification geoNotification : store.getAll()) {
             if (geoNotification == null) {
                 continue;
             }
+            Date startTime = geoNotification.getStartTime();
+            if (startTime != null && startTime.getTime() > now
+                    && (nextStart == null || startTime.getTime() < nextStart)) {
+                nextStart = startTime.getTime();
+            }
             Date endTime = geoNotification.getEndTime();
             if (endTime != null && endTime.getTime() > now
                     && (nextExpiration == null || endTime.getTime() < nextExpiration)) {
                 nextExpiration = endTime.getTime();
             }
+        }
+        if (nextStart != null) {
+            scheduleWallClockAlarm(applicationContext, ACTION_WINDOW_START,
+                    WINDOW_START_REQUEST_CODE, nextStart);
         }
         if (nextExpiration != null) {
             scheduleWallClockAlarm(applicationContext, ACTION_WINDOW_EXPIRATION,
@@ -74,8 +89,16 @@ public class GeofenceTrackingCoordinator extends BroadcastReceiver {
         Context applicationContext = context.getApplicationContext();
         Logger.setLogger(new Logger(GeofencePlugin.TAG, applicationContext, false));
         String action = intent != null ? intent.getAction() : null;
+        if (ACTION_WINDOW_START.equals(action)) {
+            refreshWindowBoundaries(applicationContext);
+            if (hasActiveInsideGeofence(applicationContext)) {
+                handleTransition(applicationContext,
+                        Geofence.GEOFENCE_TRANSITION_ENTER);
+            }
+            return;
+        }
         if (ACTION_WINDOW_EXPIRATION.equals(action)) {
-            refreshWindowExpiration(applicationContext);
+            refreshWindowBoundaries(applicationContext);
         } else if (!ACTION_DELAYED_EXIT.equals(action)) {
             return;
         }
