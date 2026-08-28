@@ -15,6 +15,7 @@ public class GeoNotification {
     @Expose public double longitude;
     @Expose public int radius;
     @Expose public int transitionType;
+    @Expose public int lastTransitionType;
     @Expose public int loiteringDelay;
 
     @Expose public String url;
