@@ -31,6 +31,7 @@
         <source-file src="src/android/GeoNotificationManager.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/GeoNotificationNotifier.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/GeoNotificationStore.java" target-dir="src/com/cowbell/cordova/geofence" />
+        <source-file src="src/android/GeofenceTrackingCoordinator.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/GeofencePlugin.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/GoogleServiceCommandExecutor.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/Gson.java" target-dir="src/com/cowbell/cordova/geofence" />
@@ -54,6 +55,7 @@
 
         <config-file target="AndroidManifest.xml" parent="/manifest/application">
             <receiver android:exported="true" android:label="@string/app_name" android:name="com.cowbell.cordova.geofence.ReceiveTransitionsReceiver" />
+            <receiver android:exported="false" android:name="com.cowbell.cordova.geofence.GeofenceTrackingCoordinator" />
         </config-file>
 
         <config-file target="AndroidManifest.xml" parent="/manifest/application">

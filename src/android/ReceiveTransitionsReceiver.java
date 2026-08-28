@@ -19,7 +19,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.TimeZone;
-import java.lang.reflect.Method;
 
 // https://codelabs.developers.google.com/codelabs/background-location-updates-android-o/#4
 public class ReceiveTransitionsReceiver extends BroadcastReceiver {
@@ -96,7 +95,7 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
                         }
                     }
 
-                    notifyNativeTransition(context, transitionType);
+                    GeofenceTrackingCoordinator.handleTransition(context, transitionType);
                     GeofencePlugin.onTransitionReceived(geoNotifications);
                 }
             } else if (transitionType == Geofence.GEOFENCE_TRANSITION_DWELL) {
@@ -104,6 +103,7 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
 
                 if (geoNotifications.size() > 0) {
                     //broadcastIntent.putExtra("transitionData", Gson.get().toJson(geoNotifications));
+                    GeofenceTrackingCoordinator.handleTransition(context, transitionType);
                     GeofencePlugin.onTransitionReceived(geoNotifications);
                 }
             } else {
@@ -150,32 +150,6 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
             }
         }
 
-    }
-
-    private boolean hasActiveInsideGeofence() {
-        for (GeoNotification geoNotification : store.getAll()) {
-            if (geoNotification != null && geoNotification.isWithinTimeRange()
-                    && !GeofencePlugin.isSnoozed(geoNotification.id)
-                    && (geoNotification.lastTransitionType == Geofence.GEOFENCE_TRANSITION_ENTER
-                    || geoNotification.lastTransitionType == Geofence.GEOFENCE_TRANSITION_DWELL)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void notifyNativeTransition(Context context, int transitionType) {
-        try {
-            Class<?> handlerClass = Class.forName("com.marianhello.bgloc.GeofenceTransitionHandler");
-            Method handler = handlerClass.getMethod("onGeofenceTransition", Context.class,
-                    Integer.TYPE, Boolean.TYPE);
-            handler.invoke(null, context.getApplicationContext(), transitionType,
-                    hasActiveInsideGeofence());
-        } catch (ClassNotFoundException error) {
-            // The geofence plugin can also be used without background geolocation.
-        } catch (Exception error) {
-            Logger.getLogger().log(Log.ERROR, "Unable to notify native geofence transition: " + error.getMessage());
-        }
     }
 
     private void updateLastTriggeredByNotificationId(int id, List<GeoNotification> geoList) {

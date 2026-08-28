@@ -46,6 +46,7 @@ public class GeoNotificationManager {
                 new AddGeofenceCommand(context, pendingIntent, geoFences)
             );
         }
+        GeofenceTrackingCoordinator.refreshWindowExpiration(context);
     }
 
     public List<GeoNotification> getWatched() {
@@ -68,9 +69,14 @@ public class GeoNotificationManager {
                                     final CallbackContext callback) {
         List<Geofence> newGeofences = new ArrayList<Geofence>();
         for (GeoNotification geo : geoNotifications) {
+            GeoNotification storedGeo = geoNotificationStore.getGeoNotification(geo.id);
+            if (storedGeo != null) {
+                geo.lastTransitionType = storedGeo.lastTransitionType;
+            }
             geoNotificationStore.setGeoNotification(geo);
             newGeofences.add(geo.toGeofence());
         }
+        GeofenceTrackingCoordinator.refreshWindowExpiration(context);
         AddGeofenceCommand geoFenceCmd = new AddGeofenceCommand(
             context,
             pendingIntent,
@@ -90,6 +96,7 @@ public class GeoNotificationManager {
         for (String id : ids) {
             geoNotificationStore.remove(id);
         }
+        GeofenceTrackingCoordinator.refreshWindowExpiration(context);
         googleServiceCommandExecutor.QueueToExecute(cmd);
     }
 
