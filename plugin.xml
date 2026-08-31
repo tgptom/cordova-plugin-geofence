@@ -135,15 +135,17 @@
 
         <config-file target="*-Info.plist" parent="UIBackgroundModes">
             <array>
-                <string>remote-notification</string>
+                <string>location</string>
             </array>
         </config-file>
         <config-file target="config.xml" parent="/*">
           <feature name="GeofencePlugin">
             <param name="ios-package" value="HWPGeofencePlugin"/>
+                        <param name="onload" value="true"/>
           </feature>
         </config-file>
         <source-file src="src/ios/GeofencePlugin.swift"/>
+        <source-file src="src/ios/GeofenceTrackingCoordinator.swift"/>
         <source-file src="src/ios/SwiftData.swift"/>
         <source-file src="src/ios/SwiftyJson.swift"/>
         <framework src="libsqlite3.tbd"/>

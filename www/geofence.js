@@ -1,29 +1,6 @@
 var exec = require("cordova/exec");
 var channel = require("cordova/channel");
 
-var isIOS = cordova.platformId === "ios"
-
-function addOrUpdateIOS (geofences, success, error) {
-    var promises = geofences.map(function (geofence) {
-        return execPromise(null, null, "GeofencePlugin", "addOrUpdate", [geofence]);
-    });
-
-    return Promise
-        .all(promises)
-        .then(function (results) {
-            if (typeof success === "function") {
-                success(results);
-            }
-            return results;
-        })
-        .catch(function (reason) {
-            if (typeof error === "function") {
-                error(reason);
-            }
-            throw reason;
-        });
-}
-
 module.exports = {
     /**
      * Initializing geofence plugin
@@ -55,11 +32,28 @@ module.exports = {
 
         geofences.forEach(coerceProperties);
 
-        if (isIOS) {
-            return addOrUpdateIOS(geofences, success, error);
+        return execPromise(success, error, "GeofencePlugin", "addOrUpdate", geofences);
+    },
+    /**
+     * Atomically replaces selected geofences after validating the final iOS region count.
+     *
+     * @param {Array} removedIds
+     * @param {Array} geofences
+     * @param {Function} success callback
+     * @param {Function} error callback
+     * @return {Promise}
+     */
+    replace: function (removedIds, geofences, success, error) {
+        if (!Array.isArray(removedIds)) {
+            removedIds = [removedIds];
+        }
+        if (!Array.isArray(geofences)) {
+            geofences = [geofences];
         }
 
-        return execPromise(success, error, "GeofencePlugin", "addOrUpdate", geofences);
+        removedIds = removedIds.map(function (id) { return id.toString(); });
+        geofences.forEach(coerceProperties);
+        return execPromise(success, error, "GeofencePlugin", "replace", [removedIds, geofences]);
     },
     /**
      * Removing geofences with given ids
@@ -289,5 +283,7 @@ function isInt(n){
 channel.deviceready.subscribe(function () {
     // Device is ready now, the listeners are registered
     // and all queued events can be executed.
-    exec(null, null, "GeofencePlugin", "deviceReady", []);
+    setTimeout(function () {
+        exec(null, null, "GeofencePlugin", "deviceReady", []);
+    }, 0);
 });

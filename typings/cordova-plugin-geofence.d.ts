@@ -21,6 +21,13 @@ interface GeofencePlugin {
     errorCallback?: (error: string) => void
   ): Promise<any>;
 
+  replace(
+    removedIds: Array<string | number>,
+    geofences: Geofence | Geofence[],
+    successCallback?: (result: any) => void,
+    errorCallback?: (error: string) => void
+  ): Promise<any>;
+
   remove(
     id: number | number[],
     successCallback?: (result: any) => void,

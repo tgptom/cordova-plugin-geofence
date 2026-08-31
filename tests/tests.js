@@ -65,6 +65,11 @@ exports.defineAutoTests = function () {
                 expect(typeof window.geofence.addOrUpdate).toBe("function");
             });
 
+            it("should contain replace function", function () {
+                expect(window.geofence.replace).toBeDefined();
+                expect(typeof window.geofence.replace).toBe("function");
+            });
+
             it("should contain initialize function", function () {
                 expect(window.geofence.initialize).toBeDefined();
                 expect(typeof window.geofence.initialize).toBe("function");
@@ -210,8 +215,38 @@ exports.defineAutoTests = function () {
                         .catch(function (error) {
                             expect(error.code).toEqual("GEOFENCE_LIMIT_EXCEEDED");
                             expect(error.message).toBeDefined();
+                            return window.geofence.getWatched();
+                        })
+                        .then(function (geofencesJson) {
+                            var watched = JSON.parse(geofencesJson);
+                            expect(watched.length).toBe(0);
                             done();
                         });
+                });
+
+                it("should atomically replace the full iOS geofence set", function (done) {
+                    if (cordova.platformId !== "ios") {
+                        pending("iOS-only atomic replacement");
+                    }
+
+                    var removedIds = geofences.map(function (item) { return item.id; });
+                    var replacements = geofences.map(function (item, index) {
+                        return Object.assign({}, item, { id: "replacement-" + index });
+                    });
+
+                    window.geofence
+                        .addOrUpdate(geofences)
+                        .then(function () {
+                            return window.geofence.replace(removedIds, replacements);
+                        })
+                        .then(window.geofence.getWatched)
+                        .then(function (geofencesJson) {
+                            var watched = JSON.parse(geofencesJson);
+                            expect(watched.length).toBe(IOS_MAX_ALLOWED_GEOFENCES);
+                            expect(watched.filter(filterById("replacement-0")).length).toBe(1);
+                            done();
+                        })
+                        .catch(fail.bind(this, done));
                 });
             });
 
