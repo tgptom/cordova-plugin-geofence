@@ -26,6 +26,7 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
     protected BeepHelper beepHelper;
     protected GeoNotificationNotifier notifier;
     protected GeoNotificationStore store;
+    protected GeofenceTrackingCoordinator trackingCoordinator;
 
     /**
      * Handles incoming intents
@@ -39,6 +40,7 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
         beepHelper = new BeepHelper();
         store = new GeoNotificationStore(context);
         Logger.setLogger(new Logger(GeofencePlugin.TAG, context, false));
+        trackingCoordinator = new GeofenceTrackingCoordinator(context);
         Logger logger = Logger.getLogger();
         logger.log(Log.DEBUG, "ReceiveTransitionsIntentService - onHandleIntent");
         //Intent broadcastIntent = new Intent(GeofenceTransitionIntent);
@@ -65,9 +67,11 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
             if (triggerList == null) {
                 return;
             }
+            List<String> triggeredIds = new ArrayList<>();
             List<GeoNotification> geoNotifications = new ArrayList<>();
             for (Geofence fence : triggerList) {
                 String fenceId = fence.getRequestId();
+                triggeredIds.add(fenceId);
                 GeoNotification geoNotification = store
                         .getGeoNotification(fenceId);
 
@@ -75,6 +79,12 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
                     geoNotification.transitionType = transitionType;
                     geoNotifications.add(geoNotification);
                 }
+            }
+
+            if (transitionType == Geofence.GEOFENCE_TRANSITION_ENTER
+                    || transitionType == Geofence.GEOFENCE_TRANSITION_EXIT
+                    || transitionType == Geofence.GEOFENCE_TRANSITION_DWELL) {
+                trackingCoordinator.onPhysicalTransition(transitionType, triggeredIds);
             }
 
             if (transitionType == Geofence.GEOFENCE_TRANSITION_ENTER

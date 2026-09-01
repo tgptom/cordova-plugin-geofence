@@ -2,6 +2,7 @@ interface TransitionType {
   ENTER: number;
   EXIT: number;
   BOTH: number;
+  DWELL: number;
 }
 
 interface Window {
@@ -19,6 +20,12 @@ interface GeofencePlugin {
     geofence: Geofence | Geofence[],
     successCallback?: (result: any) => void,
     errorCallback?: (error: string) => void
+  ): Promise<any>;
+
+  replace(
+    geofence: Geofence | Geofence[],
+    successCallback?: (result: any) => void,
+    errorCallback?: (error: string | { code: string; message: string }) => void
   ): Promise<any>;
 
   remove(

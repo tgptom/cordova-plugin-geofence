@@ -75,6 +75,11 @@ exports.defineAutoTests = function () {
                 expect(typeof window.geofence.remove).toBe("function");
             });
 
+            it("should contain replace function", function () {
+                expect(window.geofence.replace).toBeDefined();
+                expect(typeof window.geofence.replace).toBe("function");
+            });
+
             it("should contain removeAll function", function () {
                 expect(window.geofence.removeAll).toBeDefined();
                 expect(typeof window.geofence.removeAll).toBe("function");
@@ -83,6 +88,33 @@ exports.defineAutoTests = function () {
             it("should contain getWatched function", function () {
                 expect(window.geofence.getWatched).toBeDefined();
                 expect(typeof window.geofence.getWatched).toBe("function");
+            });
+        });
+
+        describe("TransitionType constants", function () {
+            it("should expose DWELL transition constant", function () {
+                expect(window.TransitionType.DWELL).toBe(4);
+            });
+        });
+
+        describe("replace function", function () {
+            it("should reject on Android before native dispatch", function (done) {
+                if (cordova.platformId !== "android") {
+                    pending();
+                }
+
+                window.geofence.replace({
+                    id: "1",
+                    latitude: 50,
+                    longitude: 50,
+                    radius: 1000,
+                    transitionType: 1
+                }).then(function () {
+                    fail(done, "replace should not resolve on Android");
+                }).catch(function (error) {
+                    expect(error.code).toBe("UNSUPPORTED_OPERATION");
+                    done();
+                });
             });
         });
 

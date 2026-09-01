@@ -1,7 +1,7 @@
 var exec = require("cordova/exec");
 var channel = require("cordova/channel");
 
-var isIOS = cordova.platformId === "ios"
+var isIOS = cordova.platformId === "ios";
 
 function addOrUpdateIOS (geofences, success, error) {
     var promises = geofences.map(function (geofence) {
@@ -60,6 +60,37 @@ module.exports = {
         }
 
         return execPromise(success, error, "GeofencePlugin", "addOrUpdate", geofences);
+    },
+    /**
+     * Replace all monitored geofences atomically.
+     * Supported on iOS only.
+     *
+     * @name replace
+     * @param {Geofence|Array} geofences
+     * @param {Function} success callback
+     * @param {Function} error callback
+     *
+     * @return {Promise}
+     */
+    replace: function (geofences, success, error) {
+        if (!Array.isArray(geofences)) {
+            geofences = [geofences];
+        }
+
+        geofences.forEach(coerceProperties);
+
+        if (!isIOS) {
+            var reason = {
+                code: "UNSUPPORTED_OPERATION",
+                message: "replace is supported only on iOS"
+            };
+            if (typeof error === "function") {
+                error(reason);
+            }
+            return Promise.reject(reason);
+        }
+
+        return execPromise(success, error, "GeofencePlugin", "replace", [geofences]);
     },
     /**
      * Removing geofences with given ids

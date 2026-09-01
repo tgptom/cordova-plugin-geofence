@@ -107,8 +107,10 @@ public class GeofencePlugin extends CordovaPlugin {
                     for (int i = 0; i < args.length(); i++) {
                         manager.cancel(args.optInt(i));
                     }
+                    callbackContext.success();
                 } else if (action.equals("snooze")) {
                     snoozedFences.put(args.optString(0), System.currentTimeMillis() + args.optLong(1) * 1000);
+                    callbackContext.success();
                 } else if (action.equals("initialize")) {
                     initialize(callbackContext);
                 } else if (action.equals("deviceReady")) {
@@ -117,6 +119,9 @@ public class GeofencePlugin extends CordovaPlugin {
                     if (data != null) {
                         onNotificationClicked(data);
                     }
+                    callbackContext.success();
+                } else {
+                    callbackContext.error("Unsupported action: " + action);
                 }
             }
         });
