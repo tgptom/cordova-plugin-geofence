@@ -21,18 +21,21 @@ public class GeoNotificationManager {
     private List<Geofence> geoFences;
     private PendingIntent pendingIntent;
     private GoogleServiceCommandExecutor googleServiceCommandExecutor;
+    private GeofenceTrackingCoordinator trackingCoordinator;
 
     public GeoNotificationManager(Context context) {
         this.context = context;
         geoNotificationStore = new GeoNotificationStore(context);
         logger = Logger.getLogger();
         googleServiceCommandExecutor = new GoogleServiceCommandExecutor();
+        trackingCoordinator = new GeofenceTrackingCoordinator(context);
         pendingIntent = getTransitionPendingIntent();
         if (areGoogleServicesAvailable()) {
             logger.log(Log.DEBUG, "Google play services available");
         } else {
             logger.log(Log.WARN, "Google play services not available. Geofence plugin will not work correctly.");
         }
+        trackingCoordinator.reconcile();
     }
 
     public void loadFromStorageAndInitializeGeofences() {
@@ -46,6 +49,7 @@ public class GeoNotificationManager {
                 new AddGeofenceCommand(context, pendingIntent, geoFences)
             );
         }
+        trackingCoordinator.reconcile();
     }
 
     public List<GeoNotification> getWatched() {
@@ -71,6 +75,7 @@ public class GeoNotificationManager {
             geoNotificationStore.setGeoNotification(geo);
             newGeofences.add(geo.toGeofence());
         }
+        trackingCoordinator.reconcile();
         AddGeofenceCommand geoFenceCmd = new AddGeofenceCommand(
             context,
             pendingIntent,
@@ -90,6 +95,7 @@ public class GeoNotificationManager {
         for (String id : ids) {
             geoNotificationStore.remove(id);
         }
+        trackingCoordinator.onGeofenceRemoved(ids);
         googleServiceCommandExecutor.QueueToExecute(cmd);
     }
 
@@ -111,6 +117,6 @@ public class GeoNotificationManager {
         //intent.setAction(ReceiveTransitionsReceiver.GeofenceTransitionIntent);
         logger.log(Log.DEBUG, "Geofence broadcast intent created");
         // https://stackoverflow.com/questions/67045607/how-to-resolve-missing-pendingintent-mutability-flag-lint-warning-in-android-a
-        return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
+        return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 }
