@@ -73,7 +73,7 @@
 			<service
 		        android:name="com.cowbell.cordova.geofence.TransitionJobService"
 		        android:permission="android.permission.BIND_JOB_SERVICE"
-		        android:exported="true">
+		        android:exported="false">
 		    </service>
 		</config-file>
 
@@ -144,6 +144,7 @@
         <config-file target="config.xml" parent="/*">
           <feature name="GeofencePlugin">
             <param name="ios-package" value="HWPGeofencePlugin"/>
+            <param name="onload" value="true" />
           </feature>
         </config-file>
         <source-file src="src/ios/GeofencePlugin.swift"/>

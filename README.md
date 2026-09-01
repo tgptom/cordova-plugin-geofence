@@ -74,7 +74,7 @@ Native bridge contract:
 - Payload keys:
   - `transitionType` (`1=ENTER`, `2=EXIT`, `4=DWELL`)
   - `hasActiveInsideGeofence` (`true` when at least one currently-active monitored geofence is physically inside)
-- Intended companion support: `tgptom/cordova-background-geolocation-plugin` PR #8+ transition handlers.
+- Intended companion support: `tgptom/cordova-background-geolocation-plugin` PR #9+ transition handlers (or the corresponding released version that includes the same native bridge contract).
 
 If the companion plugin is missing or incompatible, geofencing continues to work in standalone mode and the plugin logs diagnostics instead of crashing.
 
@@ -83,6 +83,7 @@ If the companion plugin is missing or incompatible, geofencing continues to work
 ## Android
 
 This plugin uses Google Play Services so you need to have it installed on your device.
+The geofence transition `PendingIntent` passed to `GeofencingClient.addGeofences()` is mutable on Android 12+ (API 31+) as required by Play Services, while the plugin's internal alarm/navigation `PendingIntent`s remain immutable.
 
 ## iOS
 
@@ -92,6 +93,15 @@ Plugin is written in Swift. All xcode project options to enable swift support ar
 This standalone geofence plugin does not add `UIBackgroundModes=location` for continuous tracking.
 Region monitoring is handled through Core Location geofencing APIs; if your app also needs continuous tracking, configure that in a companion background-geolocation plugin and app manifests.
 Time-window and delayed-exit reconciliation while iOS is suspended/terminated is best-effort and reconciles on supported wake events (`didEnterRegion`/`didExitRegion`/`requestState`/app activation).
+
+### iOS device validation for launch-time initialization (no JS bootstrap)
+
+1. Add at least one active geofence with a notification.
+2. Fully terminate the app (swipe away from app switcher).
+3. Move device/simulator across the region boundary to trigger enter/exit.
+4. Confirm iOS relaunches the app in the background for the location event.
+5. Confirm native reconciliation runs (`requestState` + stored state update), and a companion bridge notification (`PAPAGeofenceTrackingTransition`) is posted when installed.
+6. Confirm standalone behavior still works when companion plugin is absent (local geofence notification and no crash).
 
 :warning: Swift 3 is not supported at the moment, the following preference has to be added in your project :
 
