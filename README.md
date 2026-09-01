@@ -61,6 +61,23 @@ Therefore, **any javascript code won't run**, only background services can run i
 notification when user crosses a geofence region will still work, but any custom javascript code won't.
 If you want to perform a custom action on geofence crossing, [try to write it in native code](#listening-for-geofence-transitions-in-native-code).
 
+### Companion background-geolocation plugin compatibility
+
+This plugin remains the owner of geofence registration, persistence, and region monitoring.
+If `cordova-background-geolocation-plugin` is also installed, this plugin can optionally notify the
+companion native transition bridge so the companion plugin can decide whether to start/stop precise tracking.
+
+Native bridge contract:
+
+- Android optional static callback: `com.marianhello.bgloc.GeofenceTransitionHandler.onGeofenceTransition(Context,int,boolean)`
+- iOS optional notification: `PAPAGeofenceTrackingTransition`
+- Payload keys:
+  - `transitionType` (`1=ENTER`, `2=EXIT`, `4=DWELL`)
+  - `hasActiveInsideGeofence` (`true` when at least one currently-active monitored geofence is physically inside)
+- Intended companion support: `tgptom/cordova-background-geolocation-plugin` PR #8+ transition handlers.
+
+If the companion plugin is missing or incompatible, geofencing continues to work in standalone mode and the plugin logs diagnostics instead of crashing.
+
 # Platform specifics
 
 ## Android
@@ -71,6 +88,9 @@ This plugin uses Google Play Services so you need to have it installed on your d
 
 Plugin is written in Swift. All xcode project options to enable swift support are set up automatically after plugin is installed thanks to
 [cordova-plugin-add-swift-support](https://github.com/akofman/cordova-plugin-add-swift-support).
+
+This standalone geofence plugin does not add `UIBackgroundModes=location` for continuous tracking.
+Region monitoring is handled through Core Location geofencing APIs; if your app also needs continuous tracking, configure that in a companion background-geolocation plugin and app manifests.
 
 :warning: Swift 3 is not supported at the moment, the following preference has to be added in your project :
 
@@ -95,6 +115,10 @@ Example:
 `cordova plugin add cordova-plugin-geofence --variable GEOFENCE_IN_USE_USAGE_DESCRIPTION="your usage message" --variable GEOFENCE_ALWAYS_USAGE_DESCRIPTION="your usage message"`
 
 If you don't pass the variable, the plugin will add a default string as value.
+
+### App submission responsibilities
+
+Using geofencing/background location requires app-level disclosures and permission prompts that match your real behavior (for example purpose strings, privacy policy, and store data-safety/privacy declarations). This plugin cannot guarantee Apple App Store or Google Play approval by itself.
 
 ## Windows phone 8.1
 
@@ -122,6 +146,7 @@ All methods returning promises, but you can also use standard callback functions
 
 - `window.geofence.initialize(onSuccess, onError)`
 - `window.geofence.addOrUpdate(geofences, onSuccess, onError)`
+- `window.geofence.replace(geofences, onSuccess, onError)` (iOS only; Android rejects with `UNSUPPORTED_OPERATION`)
 - `window.geofence.remove(geofenceId, onSuccess, onError)`
 - `window.geofence.removeAll(onSuccess, onError)`
 - `window.geofence.getWatched(onSuccess, onError)`
@@ -134,6 +159,7 @@ For listening of geofence transistion you can override onTransitionReceived meth
 - `TransitionType.ENTER` = 1
 - `TransitionType.EXIT` = 2
 - `TransitionType.BOTH` = 3
+- `TransitionType.DWELL` = 4
 
 ## Error Codes
 
@@ -152,6 +178,7 @@ Error codes:
 - `PERMISSION_DENIED`
 - `GEOFENCE_NOT_AVAILABLE`
 - `GEOFENCE_LIMIT_EXCEEDED`
+- `UNSUPPORTED_OPERATION`
 
 ## Plugin initialization
 
@@ -317,42 +344,10 @@ window.geofence.onTransitionReceived = function (geofences) {
 
 ### Android
 
-For android plugin broadcasting intent `com.cowbell.cordova.geofence.TRANSITION`. You can implement your own `BroadcastReceiver` and start listening for this intent.
+The plugin delivers JavaScript transition events through `window.geofence.onTransitionReceived`.
+For cross-plugin native integration with `cordova-background-geolocation-plugin`, use the compatibility contract documented above.
 
-Register receiver in `AndroidManifest.xml`
-
-```xml
-<receiver android:name="YOUR_APP_PACKAGE_NAME.TransitionReceiver">
-    <intent-filter>
-        <action android:name="com.cowbell.cordova.geofence.TRANSITION" />
-    </intent-filter>
-</receiver>
-```
-
-Example `TransitionReceiver.java` code
-
-```java
-......
-import com.cowbell.cordova.geofence.Gson;
-import com.cowbell.cordova.geofence.GeoNotification;
-
-public class TransitionReceiver extends BroadcastReceiver {
-
-    @Override
-    public void onReceive(Context context, Intent intent) {
-        String error = intent.getStringExtra("error");
-
-        if (error != null) {
-            //handle error
-            Log.println(Log.ERROR, "YourAppTAG", error);
-        } else {
-            String geofencesJson = intent.getStringExtra("transitionData");
-            GeoNotification[] geoNotifications = Gson.get().fromJson(geofencesJson, GeoNotification[].class);
-            //handle geoNotifications objects
-        }
-    }
-}
-```
+Android note: receiver/service coordination uses non-exact alarms (`AlarmManager.setWindow`) for window-boundary/exit reconciliation, so timing near boundaries is best-effort and reconciled again on the next wake/transition.
 
 ## When the app is opened via Notification click
 
