@@ -31,6 +31,7 @@ public class GeoNotificationManager {
         googleServiceCommandExecutor = new GoogleServiceCommandExecutor();
         trackingCoordinator = new GeofenceTrackingCoordinator(context);
         pendingIntent = getTransitionPendingIntent();
+        verifyTransitionPendingIntentFlags();
         if (areGoogleServicesAvailable()) {
             logger.log(Log.DEBUG, "Google play services available");
         } else {
@@ -133,5 +134,14 @@ public class GeoNotificationManager {
 
     static int getTransitionPendingIntentFlags() {
         return resolveTransitionPendingIntentFlagsForApi(Build.VERSION.SDK_INT);
+    }
+
+    private void verifyTransitionPendingIntentFlags() {
+        int flags = getTransitionPendingIntentFlags();
+        boolean hasMutableFlag = (flags & PendingIntent.FLAG_MUTABLE) != 0;
+        boolean shouldBeMutable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S;
+        if (hasMutableFlag != shouldBeMutable) {
+            logger.log(Log.ERROR, "Transition PendingIntent mutability flags are misconfigured for API " + Build.VERSION.SDK_INT);
+        }
     }
 }
