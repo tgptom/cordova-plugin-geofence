@@ -17,6 +17,7 @@ import org.apache.cordova.PluginResult;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
@@ -134,22 +135,42 @@ public class GeofencePlugin extends CordovaPlugin {
     }
 
     private GeoNotification parseFromJSONObject(JSONObject object) {
-        GeoNotification geo = GeoNotification.fromJson(object.toString());
-        return geo;
+        if (object == null) {
+            Log.e(TAG, "Invalid geofence payload: null object");
+            return null;
+        }
+        try {
+            return GeoNotification.fromJson(object.toString());
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Failed to parse geofence payload", e);
+            return null;
+        }
     }
 
     public static void onTransitionReceived(List<GeoNotification> notifications) {
         Log.d(TAG, "Transition Event Received!");
-        String js = "setTimeout('geofence.onTransitionReceived("
-            + Gson.get().toJson(notifications) + ")',0)";
-        sendJavascript(js);
+        sendJavascript(buildSafeCallbackJs("geofence.onTransitionReceived",
+            Gson.get().toJson(notifications)));
     }
 
     private void onNotificationClicked(String data) {
-        if (data != null) {
-            String js = "setTimeout('geofence.onNotificationClicked(" + data + ")',0)";
-            sendJavascript(js);
+        if (data == null || data.isEmpty()) {
+            return;
         }
+
+        try {
+            new JSONTokener(data).nextValue();
+        } catch (JSONException e) {
+            Log.e(TAG, "Ignoring malformed notification click payload", e);
+            return;
+        }
+
+        sendJavascript(buildSafeCallbackJs("geofence.onNotificationClicked", data));
+    }
+
+    private static String buildSafeCallbackJs(String functionName, String jsonPayload) {
+        return "setTimeout(function(){ " + functionName + "(JSON.parse("
+            + JSONObject.quote(jsonPayload) + ")); },0)";
     }
 
     private void initialize(CallbackContext callbackContext) {
