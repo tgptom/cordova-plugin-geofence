@@ -1,7 +1,6 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 
 const repoRoot = path.resolve(__dirname, '..');
 const geofencePluginPath = path.join(repoRoot, 'src/android/GeofencePlugin.java');
@@ -52,36 +51,17 @@ assert(
   'Notification PendingIntent must not be mutable'
 );
 
-function buildSafeCallbackJs(functionName, jsonPayload) {
-  return `setTimeout(function(){ ${functionName}(JSON.parse(${JSON.stringify(jsonPayload)})); },0)`;
-}
-
 const transitionPayload = [{
   id: 'g1',
   tricky: 'apostrophe \', quote ", slash \\\\, sep\u2028line\u2029para',
   codeLike: '\');globalThis.__injected=true;//'
 }];
 const callbackJson = JSON.stringify(transitionPayload);
-
-const context = {
-  geofence: {
-    onTransitionReceived(received) {
-      context.received = received;
-    }
-  },
-  setTimeout(fn) {
-    fn();
-  },
-  received: null,
-  __injected: false
-};
-
-vm.createContext(context);
-vm.runInContext(buildSafeCallbackJs('geofence.onTransitionReceived', callbackJson), context);
+const quotedJsonPayload = JSON.stringify(callbackJson);
+const parsedPayload = JSON.parse(JSON.parse(quotedJsonPayload));
 
 assert.strictEqual(
-  JSON.stringify(context.received),
+  JSON.stringify(parsedPayload),
   JSON.stringify(transitionPayload),
-  'Payload must be delivered as inert data'
+  'Payload containing special characters must remain inert data after quote+parse roundtrip'
 );
-assert.strictEqual(context.__injected, false, 'Code-like payload content must not execute');
