@@ -55,6 +55,7 @@ func log(_ messages: [String]) {
             object: nil
         )
         geoNotificationManager = GeoNotificationManager()
+        geoNotificationManager.reconcileMonitoredGeofencesAndState()
     }
     
     @objc func initialize(_ command: CDVInvokedUrlCommand) {

@@ -3,6 +3,7 @@ package com.cowbell.cordova.geofence;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.util.Log;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -116,7 +117,21 @@ public class GeoNotificationManager {
         Intent intent = new Intent(context, ReceiveTransitionsReceiver.class);
         //intent.setAction(ReceiveTransitionsReceiver.GeofenceTransitionIntent);
         logger.log(Log.DEBUG, "Geofence broadcast intent created");
-        // https://stackoverflow.com/questions/67045607/how-to-resolve-missing-pendingintent-mutability-flag-lint-warning-in-android-a
-        return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return PendingIntent.getBroadcast(context, 0, intent, getTransitionPendingIntentFlags());
+    }
+
+    // Helper kept deterministic by API level so behavior can be verified without device-specific PendingIntent inspection.
+    static int resolveTransitionPendingIntentFlagsForApi(int apiLevel) {
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (apiLevel >= Build.VERSION_CODES.S) {
+            flags |= PendingIntent.FLAG_MUTABLE;
+        } else if (apiLevel >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        return flags;
+    }
+
+    static int getTransitionPendingIntentFlags() {
+        return resolveTransitionPendingIntentFlagsForApi(Build.VERSION.SDK_INT);
     }
 }
