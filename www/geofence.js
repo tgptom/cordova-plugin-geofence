@@ -1,7 +1,7 @@
 var exec = require("cordova/exec");
 var channel = require("cordova/channel");
 
-var isIOS = cordova.platformId === "ios"
+var isIOS = cordova.platformId === "ios";
 
 function addOrUpdateIOS (geofences, success, error) {
     var promises = geofences.map(function (geofence) {
@@ -60,6 +60,37 @@ module.exports = {
         }
 
         return execPromise(success, error, "GeofencePlugin", "addOrUpdate", geofences);
+    },
+    /**
+     * Replace all monitored geofences atomically.
+     * Supported on iOS only.
+     *
+     * @name replace
+     * @param {Geofence|Array} geofences
+     * @param {Function} success callback
+     * @param {Function} error callback
+     *
+     * @return {Promise}
+     */
+    replace: function (geofences, success, error) {
+        if (!Array.isArray(geofences)) {
+            geofences = [geofences];
+        }
+
+        geofences.forEach(coerceProperties);
+
+        if (!isIOS) {
+            var reason = {
+                code: "UNSUPPORTED_OPERATION",
+                message: "replace is supported only on iOS"
+            };
+            if (typeof error === "function") {
+                error(reason);
+            }
+            return Promise.reject(reason);
+        }
+
+        return execPromise(success, error, "GeofencePlugin", "replace", [geofences]);
     },
     /**
      * Removing geofences with given ids
@@ -183,32 +214,40 @@ function execPromise(success, error, pluginName, method, args) {
 }
 
 function coerceProperties(geofence) {
-    if (geofence.id) {
+    if (geofence.id !== undefined && geofence.id !== null && geofence.id !== "") {
         geofence.id = geofence.id.toString();
     } else {
         throw new Error("Geofence id is not provided");
     }
 
-    if (geofence.latitude) {
+    if (geofence.latitude !== undefined && geofence.latitude !== null) {
         geofence.latitude = coerceNumber("Geofence latitude", geofence.latitude);
+        ensureInRange("Geofence latitude", geofence.latitude, -90, 90);
     } else {
         throw new Error("Geofence latitude is not provided");
     }
 
-    if (geofence.longitude) {
+    if (geofence.longitude !== undefined && geofence.longitude !== null) {
         geofence.longitude = coerceNumber("Geofence longitude", geofence.longitude);
+        ensureInRange("Geofence longitude", geofence.longitude, -180, 180);
     } else {
         throw new Error("Geofence longitude is not provided");
     }
 
-    if (geofence.radius) {
+    if (geofence.radius !== undefined && geofence.radius !== null) {
         geofence.radius = coerceNumber("Geofence radius", geofence.radius);
+        if (geofence.radius <= 0) {
+            throw new Error("Geofence radius must be greater than zero");
+        }
     } else {
         throw new Error("Geofence radius is not provided");
     }
 
-    if (geofence.transitionType) {
+    if (geofence.transitionType !== undefined && geofence.transitionType !== null) {
         geofence.transitionType = coerceNumber("Geofence transitionType", geofence.transitionType);
+        if (geofence.transitionType <= 0) {
+            throw new Error("Geofence transitionType must be greater than zero");
+        }
     } else {
         throw new Error("Geofence transitionType is not provided");
     }
@@ -256,6 +295,10 @@ function coerceNumber(name, value) {
         }
     }
 
+    if (!isFinite(value)) {
+        throw new Error(name + " is not finite");
+    }
+
     return value;
 }
 
@@ -283,6 +326,12 @@ function coerceBoolean(name, value) {
 
 function isInt(n){
     return Number(n) === n && n % 1 === 0;
+}
+
+function ensureInRange(name, value, min, max) {
+    if (value < min || value > max) {
+        throw new Error(name + " out of range");
+    }
 }
 
 // Called after "deviceready" event

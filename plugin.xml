@@ -31,7 +31,11 @@
         <source-file src="src/android/GeoNotificationManager.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/GeoNotificationNotifier.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/GeoNotificationStore.java" target-dir="src/com/cowbell/cordova/geofence" />
+        <source-file src="src/android/CompanionGeofenceBridge.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/GeofencePlugin.java" target-dir="src/com/cowbell/cordova/geofence" />
+        <source-file src="src/android/GeofenceTrackingContract.java" target-dir="src/com/cowbell/cordova/geofence" />
+        <source-file src="src/android/GeofenceTrackingCoordinator.java" target-dir="src/com/cowbell/cordova/geofence" />
+        <source-file src="src/android/GeofenceTrackingCoordinatorReceiver.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/GoogleServiceCommandExecutor.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/Gson.java" target-dir="src/com/cowbell/cordova/geofence" />
         <source-file src="src/android/IGoogleServiceCommandListener.java" target-dir="src/com/cowbell/cordova/geofence" />
@@ -53,7 +57,8 @@
         </config-file>
 
         <config-file target="AndroidManifest.xml" parent="/manifest/application">
-            <receiver android:exported="true" android:label="@string/app_name" android:name="com.cowbell.cordova.geofence.ReceiveTransitionsReceiver" />
+            <receiver android:exported="false" android:label="@string/app_name" android:name="com.cowbell.cordova.geofence.ReceiveTransitionsReceiver" />
+            <receiver android:exported="false" android:name="com.cowbell.cordova.geofence.GeofenceTrackingCoordinatorReceiver" />
         </config-file>
 
         <config-file target="AndroidManifest.xml" parent="/manifest/application">
@@ -68,7 +73,7 @@
 			<service
 		        android:name="com.cowbell.cordova.geofence.TransitionJobService"
 		        android:permission="android.permission.BIND_JOB_SERVICE"
-		        android:exported="true">
+		        android:exported="false">
 		    </service>
 		</config-file>
 
@@ -139,6 +144,7 @@
         <config-file target="config.xml" parent="/*">
           <feature name="GeofencePlugin">
             <param name="ios-package" value="HWPGeofencePlugin"/>
+            <param name="onload" value="true" />
           </feature>
         </config-file>
         <source-file src="src/ios/GeofencePlugin.swift"/>
