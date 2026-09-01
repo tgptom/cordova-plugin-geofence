@@ -288,6 +288,24 @@ exports.defineAutoTests = function () {
                         });
                 });
 
+                it("should allow zero latitude and longitude", function (done) {
+                    if (skipAndroid) {
+                        pending();
+                    }
+
+                    geofence.latitude = 0;
+                    geofence.longitude = 0;
+                    window.geofence.addOrUpdate(geofence)
+                        .then(window.geofence.getWatched)
+                        .then(function (geofencesJson) {
+                            var geofences = JSON.parse(geofencesJson);
+                            expect(geofences[0].latitude).toBe(0);
+                            expect(geofences[0].longitude).toBe(0);
+                            done();
+                        })
+                        .catch(fail.bind(this, done));
+                });
+
                 it("should throw an error if longitude is not provided", function (done) {
                     geofence.longitude = undefined;
 
