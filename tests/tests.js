@@ -97,6 +97,45 @@ exports.defineAutoTests = function () {
             });
         });
 
+        describe("callback behavior", function () {
+            it("should call initialize success callback exactly once", function (done) {
+                var successCalls = 0;
+                window.geofence.initialize(function () {
+                    successCalls += 1;
+                }).then(function () {
+                    setTimeout(function () {
+                        expect(successCalls).toBe(1);
+                        done();
+                    }, 50);
+                }).catch(fail.bind(this, done));
+            });
+
+            it("should call addOrUpdate success callback exactly once", function (done) {
+                if (skipAndroid) {
+                    pending();
+                }
+
+                var geofence = {
+                    id: "callback-once-test",
+                    latitude: 50,
+                    longitude: 50,
+                    radius: 1000,
+                    transitionType: 1
+                };
+                var successCalls = 0;
+                window.geofence.addOrUpdate(geofence, function () {
+                    successCalls += 1;
+                }).then(function () {
+                    setTimeout(function () {
+                        expect(successCalls).toBe(1);
+                        window.geofence.remove("callback-once-test")
+                            .then(function () { done(); })
+                            .catch(fail.bind(this, done));
+                    }, 50);
+                }).catch(fail.bind(this, done));
+            });
+        });
+
         describe("replace function", function () {
             it("should reject on Android before native dispatch", function (done) {
                 if (cordova.platformId !== "android") {
