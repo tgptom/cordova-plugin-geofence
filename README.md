@@ -92,6 +92,7 @@ Plugin is written in Swift. All xcode project options to enable swift support ar
 
 This standalone geofence plugin does not add `UIBackgroundModes=location` for continuous tracking.
 Region monitoring is handled through Core Location geofencing APIs; if your app also needs continuous tracking, configure that in a companion background-geolocation plugin and app manifests.
+The iOS plugin is loaded with `onload=true` so the Core Location delegate is installed during launch/background relaunch, but this eager native initialization does not request location permission by itself.
 Time-window and delayed-exit reconciliation while iOS is suspended/terminated is best-effort and reconciles on supported wake events (`didEnterRegion`/`didExitRegion`/`requestState`/app activation).
 
 ### iOS device validation for launch-time initialization (no JS bootstrap)
@@ -101,7 +102,14 @@ Time-window and delayed-exit reconciliation while iOS is suspended/terminated is
 3. Move device/simulator across the region boundary to trigger enter/exit.
 4. Confirm iOS relaunches the app in the background for the location event.
 5. Confirm native reconciliation runs (`requestState` + stored state update), and a companion bridge notification (`PAPAGeofenceTrackingTransition`) is posted when installed.
-6. Confirm standalone behavior still works when companion plugin is absent (local geofence notification and no crash).
+6. Confirm this relaunch path does **not** show a new location permission prompt.
+7. Confirm standalone behavior still works when companion plugin is absent (local geofence notification and no crash).
+
+### iOS device validation for permission prompt timing
+
+1. Fresh install with location permission not yet granted.
+2. Launch app and wait for plugin eager load (`onload=true`) without calling `geofence.initialize()`: confirm no location permission prompt appears.
+3. Trigger explicit app action that calls `geofence.initialize()`: confirm the app may now request location permission.
 
 :warning: Swift 3 is not supported at the moment, the following preference has to be added in your project :
 
@@ -206,7 +214,7 @@ document.addEventListener('deviceready', function () {
 }, false);
 ```
 
-Initialization process is responsible for requesting neccessary permissions.
+Initialization process is responsible for requesting necessary permissions (including Always Location when required by your app flow).
 If required permissions are not granted then initialization fails with error message.
 
 ## Adding new geofence to monitor
