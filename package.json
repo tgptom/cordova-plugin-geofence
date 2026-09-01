@@ -1,6 +1,6 @@
 {
   "name": "cordova-plugin-geofence",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Cordova geofence plugin",
   "cordova": {
     "id": "cordova-plugin-geofence",

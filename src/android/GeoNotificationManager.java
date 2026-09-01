@@ -3,6 +3,7 @@ package com.cowbell.cordova.geofence;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.util.Log;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -21,18 +22,22 @@ public class GeoNotificationManager {
     private List<Geofence> geoFences;
     private PendingIntent pendingIntent;
     private GoogleServiceCommandExecutor googleServiceCommandExecutor;
+    private GeofenceTrackingCoordinator trackingCoordinator;
 
     public GeoNotificationManager(Context context) {
         this.context = context;
         geoNotificationStore = new GeoNotificationStore(context);
         logger = Logger.getLogger();
         googleServiceCommandExecutor = new GoogleServiceCommandExecutor();
+        trackingCoordinator = new GeofenceTrackingCoordinator(context);
         pendingIntent = getTransitionPendingIntent();
+        verifyTransitionPendingIntentFlags();
         if (areGoogleServicesAvailable()) {
             logger.log(Log.DEBUG, "Google play services available");
         } else {
             logger.log(Log.WARN, "Google play services not available. Geofence plugin will not work correctly.");
         }
+        trackingCoordinator.reconcile();
     }
 
     public void loadFromStorageAndInitializeGeofences() {
@@ -46,6 +51,7 @@ public class GeoNotificationManager {
                 new AddGeofenceCommand(context, pendingIntent, geoFences)
             );
         }
+        trackingCoordinator.reconcile();
     }
 
     public List<GeoNotification> getWatched() {
@@ -71,6 +77,7 @@ public class GeoNotificationManager {
             geoNotificationStore.setGeoNotification(geo);
             newGeofences.add(geo.toGeofence());
         }
+        trackingCoordinator.reconcile();
         AddGeofenceCommand geoFenceCmd = new AddGeofenceCommand(
             context,
             pendingIntent,
@@ -90,6 +97,7 @@ public class GeoNotificationManager {
         for (String id : ids) {
             geoNotificationStore.remove(id);
         }
+        trackingCoordinator.onGeofenceRemoved(ids);
         googleServiceCommandExecutor.QueueToExecute(cmd);
     }
 
@@ -110,7 +118,30 @@ public class GeoNotificationManager {
         Intent intent = new Intent(context, ReceiveTransitionsReceiver.class);
         //intent.setAction(ReceiveTransitionsReceiver.GeofenceTransitionIntent);
         logger.log(Log.DEBUG, "Geofence broadcast intent created");
-        // https://stackoverflow.com/questions/67045607/how-to-resolve-missing-pendingintent-mutability-flag-lint-warning-in-android-a
-        return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
+        return PendingIntent.getBroadcast(context, 0, intent, getTransitionPendingIntentFlags());
+    }
+
+    // Helper kept deterministic by API level so behavior can be verified without device-specific PendingIntent inspection.
+    static int resolveTransitionPendingIntentFlagsForApi(int apiLevel) {
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (apiLevel >= Build.VERSION_CODES.S) {
+            flags |= PendingIntent.FLAG_MUTABLE;
+        } else if (apiLevel >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        return flags;
+    }
+
+    static int getTransitionPendingIntentFlags() {
+        return resolveTransitionPendingIntentFlagsForApi(Build.VERSION.SDK_INT);
+    }
+
+    private void verifyTransitionPendingIntentFlags() {
+        int flags = getTransitionPendingIntentFlags();
+        boolean hasMutableFlag = (flags & PendingIntent.FLAG_MUTABLE) != 0;
+        boolean shouldBeMutable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S;
+        if (hasMutableFlag != shouldBeMutable) {
+            logger.log(Log.ERROR, "Transition PendingIntent mutability flags are misconfigured for API " + Build.VERSION.SDK_INT);
+        }
     }
 }

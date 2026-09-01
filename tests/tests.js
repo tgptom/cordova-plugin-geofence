@@ -75,6 +75,11 @@ exports.defineAutoTests = function () {
                 expect(typeof window.geofence.remove).toBe("function");
             });
 
+            it("should contain replace function", function () {
+                expect(window.geofence.replace).toBeDefined();
+                expect(typeof window.geofence.replace).toBe("function");
+            });
+
             it("should contain removeAll function", function () {
                 expect(window.geofence.removeAll).toBeDefined();
                 expect(typeof window.geofence.removeAll).toBe("function");
@@ -83,6 +88,72 @@ exports.defineAutoTests = function () {
             it("should contain getWatched function", function () {
                 expect(window.geofence.getWatched).toBeDefined();
                 expect(typeof window.geofence.getWatched).toBe("function");
+            });
+        });
+
+        describe("TransitionType constants", function () {
+            it("should expose DWELL transition constant", function () {
+                expect(window.TransitionType.DWELL).toBe(4);
+            });
+        });
+
+        describe("callback behavior", function () {
+            it("should call initialize success callback exactly once", function (done) {
+                var successCalls = 0;
+                window.geofence.initialize(function () {
+                    successCalls += 1;
+                }).then(function () {
+                    setTimeout(function () {
+                        expect(successCalls).toBe(1);
+                        done();
+                    }, 50);
+                }).catch(fail.bind(this, done));
+            });
+
+            it("should call addOrUpdate success callback exactly once", function (done) {
+                if (skipAndroid) {
+                    pending();
+                }
+
+                var geofence = {
+                    id: "callback-once-test",
+                    latitude: 50,
+                    longitude: 50,
+                    radius: 1000,
+                    transitionType: 1
+                };
+                var successCalls = 0;
+                window.geofence.addOrUpdate(geofence, function () {
+                    successCalls += 1;
+                }).then(function () {
+                    setTimeout(function () {
+                        expect(successCalls).toBe(1);
+                        window.geofence.remove("callback-once-test")
+                            .then(function () { done(); })
+                            .catch(fail.bind(this, done));
+                    }, 50);
+                }).catch(fail.bind(this, done));
+            });
+        });
+
+        describe("replace function", function () {
+            it("should reject on Android before native dispatch", function (done) {
+                if (cordova.platformId !== "android") {
+                    pending();
+                }
+
+                window.geofence.replace({
+                    id: "1",
+                    latitude: 50,
+                    longitude: 50,
+                    radius: 1000,
+                    transitionType: 1
+                }).then(function () {
+                    fail(done, "replace should not resolve on Android");
+                }).catch(function (error) {
+                    expect(error.code).toBe("UNSUPPORTED_OPERATION");
+                    done();
+                });
             });
         });
 
@@ -254,6 +325,24 @@ exports.defineAutoTests = function () {
                             expect(geofence.latitude).toBe(50.5);
                             done();
                         });
+                });
+
+                it("should allow zero latitude and longitude", function (done) {
+                    if (skipAndroid) {
+                        pending();
+                    }
+
+                    geofence.latitude = 0;
+                    geofence.longitude = 0;
+                    window.geofence.addOrUpdate(geofence)
+                        .then(window.geofence.getWatched)
+                        .then(function (geofencesJson) {
+                            var geofences = JSON.parse(geofencesJson);
+                            expect(geofences[0].latitude).toBe(0);
+                            expect(geofences[0].longitude).toBe(0);
+                            done();
+                        })
+                        .catch(fail.bind(this, done));
                 });
 
                 it("should throw an error if longitude is not provided", function (done) {

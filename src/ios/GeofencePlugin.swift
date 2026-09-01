@@ -7,11 +7,18 @@
 //
 
 import Foundation
+import UIKit
 import WebKit
 import UserNotifications
 import CoreLocation
 
 let TAG = "GeofencePlugin"
+let AppGeofenceTrackingTransition = "AppGeofenceTrackingTransition"
+let GeofenceTrackingTransitionTypeKey = "transitionType"
+let GeofenceTrackingHasActiveInsideKey = "hasActiveInsideGeofence"
+let GeofenceTransitionEnter = 1
+let GeofenceTransitionExit = 2
+let GeofenceTransitionDwell = 4
 
 func log(_ message: String){
     NSLog("%@ - %@", TAG, message)
@@ -25,7 +32,6 @@ func log(_ messages: [String]) {
 
 @objc(HWPGeofencePlugin) class GeofencePlugin : CDVPlugin {
     lazy var geoNotificationManager = GeoNotificationManager()
-    let priority = DispatchQoS.QoSClass.default
     
     override func pluginInitialize () {
         NotificationCenter.default.addObserver(
@@ -41,7 +47,16 @@ func log(_ messages: [String]) {
             name: NSNotification.Name(rawValue: "handleTransition"),
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(GeofencePlugin.didBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
         geoNotificationManager = GeoNotificationManager()
+        geoNotificationManager.performSerialized {
+            self.geoNotificationManager.reconcileMonitoredGeofencesAndState()
+        }
     }
     
     @objc func initialize(_ command: CDVInvokedUrlCommand) {
@@ -50,28 +65,24 @@ func log(_ messages: [String]) {
         // faker.start()
         
         promptForNotificationPermission()
-		// comment to remove permissions
-         geoNotificationManager.registerPermissions()
-        geoNotificationManager.isActive = true
-        geoNotificationManager.startUpdatingLocation()
-
-        let (ok, warnings, errors) = geoNotificationManager.checkRequirements()
-        
-        log(warnings)
-        log(errors)
-        
-        let result: CDVPluginResult
-        
-        if ok {
-            result = CDVPluginResult(status: CDVCommandStatus.ok, messageAs: warnings.joined(separator: "\n"))
-        } else {
-            result = CDVPluginResult(
+        runSerializedCommand(command) {
+            self.geoNotificationManager.registerPermissions()
+            self.geoNotificationManager.isActive = true
+            self.geoNotificationManager.reconcileMonitoredGeofencesAndState()
+            
+            let (ok, warnings, errors) = self.geoNotificationManager.checkRequirements()
+            
+            log(warnings)
+            log(errors)
+            
+            if ok {
+                return CDVPluginResult(status: CDVCommandStatus.ok, messageAs: warnings.joined(separator: "\n"))
+            }
+            return CDVPluginResult(
                 status: CDVCommandStatus.illegalAccessException,
                 messageAs: (errors + warnings).joined(separator: "\n")
             )
         }
-        
-        commandDelegate!.send(result, callbackId: command.callbackId)
     }
     
     @objc func deviceReady(_ command: CDVInvokedUrlCommand) {
@@ -94,74 +105,68 @@ func log(_ messages: [String]) {
     }
     
     @objc func addOrUpdate(_ command: CDVInvokedUrlCommand) {
-        DispatchQueue.global(qos: priority).async {
-            for geo in command.arguments {
-                self.geoNotificationManager.addOrUpdateGeoNotification(JSON(geo))
-            }
-            DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
-                self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
-            }
+        runSerializedCommand(command) {
+            try self.geoNotificationManager.addOrUpdateGeoNotifications(command.arguments.map { JSON($0) })
+            return CDVPluginResult(status: CDVCommandStatus.ok)
         }
     }
     
     @objc func getWatched(_ command: CDVInvokedUrlCommand) {
-        DispatchQueue.global(qos: priority).async {
-            let watched = self.geoNotificationManager.getWatchedGeoNotifications()!
-            let watchedJsonString = watched.description
-            DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok, messageAs: watchedJsonString)
-                self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
+        runSerializedCommand(command) {
+            let watched = self.geoNotificationManager.getWatchedGeoNotifications() ?? []
+            return CDVPluginResult(status: CDVCommandStatus.ok, messageAs: watched.description)
+        }
+    }
+
+    @objc func replace(_ command: CDVInvokedUrlCommand) {
+        runSerializedCommand(command) {
+            let payload: [Any]
+            if let firstArgument = command.arguments.first as? [Any] {
+                payload = firstArgument
+            } else {
+                payload = command.arguments
             }
+            try self.geoNotificationManager.replaceGeoNotifications(payload.map { JSON($0) })
+            return CDVPluginResult(status: CDVCommandStatus.ok)
         }
     }
     
     @objc func remove(_ command: CDVInvokedUrlCommand) {
-        DispatchQueue.global(qos: priority).async {
+        runSerializedCommand(command) {
             for id in command.arguments {
                 self.geoNotificationManager.removeGeoNotification(id as! String)
             }
-            DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
-                self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
-            }
+            self.geoNotificationManager.reconcileTrackingState()
+            return CDVPluginResult(status: CDVCommandStatus.ok)
         }
     }
     
     @objc func removeAll(_ command: CDVInvokedUrlCommand) {
-        DispatchQueue.global(qos: priority).async {
+        runSerializedCommand(command) {
             self.geoNotificationManager.removeAllGeoNotifications()
-            DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
-                self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
-            }
+            self.geoNotificationManager.reconcileTrackingState()
+            return CDVPluginResult(status: CDVCommandStatus.ok)
         }
     }
     
     @objc func snooze(_ command: CDVInvokedUrlCommand) {
         log("snooze")
-        DispatchQueue.global(qos: priority).async {
+        runSerializedCommand(command) {
             if let id = command.arguments[0] as? Int,
                 let duration = command.arguments[1] as? Int {
                 self.geoNotificationManager.snoozeFence(String(id), duration: Double(duration))
             }
-            DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
-                self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
-            }
+            return CDVPluginResult(status: CDVCommandStatus.ok)
         }
     }
     
     @objc func dismissNotifications(_ command: CDVInvokedUrlCommand) {
         log("dismissNotifications")
-        DispatchQueue.global(qos: priority).async {
+        runSerializedCommand(command) {
             if let ids = command.arguments as? [Int] {
                 self.geoNotificationManager.dismissNotifications(ids.map { String($0) })
             }
-            DispatchQueue.main.async {
-                let pluginResult = CDVPluginResult(status: CDVCommandStatus.ok)
-                self.commandDelegate!.send(pluginResult, callbackId: command.callbackId)
-            }
+            return CDVPluginResult(status: CDVCommandStatus.ok)
         }
     }
     
@@ -185,6 +190,12 @@ func log(_ messages: [String]) {
         
         evaluateJs(js)
     }
+
+    @objc func didBecomeActive() {
+        geoNotificationManager.performSerialized {
+            self.geoNotificationManager.reconcileMonitoredGeofencesAndState()
+        }
+    }
     
     func evaluateJs (_ script: String) {
         if let webView = webView {
@@ -201,8 +212,27 @@ func log(_ messages: [String]) {
     
     override func onAppTerminate() {
         log("onAppTerminate")
-        geoNotificationManager.isActive = false
+        geoNotificationManager.performSerialized {
+            self.geoNotificationManager.isActive = false
+        }
         super.onAppTerminate()
+    }
+
+    func runSerializedCommand(
+        _ command: CDVInvokedUrlCommand,
+        work: @escaping () throws -> CDVPluginResult
+    ) {
+        geoNotificationManager.performSerialized {
+            let pluginResult: CDVPluginResult
+            do {
+                pluginResult = try work()
+            } catch {
+                pluginResult = CDVPluginResult(status: CDVCommandStatus.error, messageAs: error.localizedDescription)
+            }
+            DispatchQueue.main.async {
+                self.commandDelegate?.send(pluginResult, callbackId: command.callbackId)
+            }
+        }
     }
 }
 
@@ -250,31 +280,159 @@ class GeofenceFaker {
 }
 
 class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotificationCenterDelegate {
-    let locationManager = CLLocationManager()
+    let locationManager: CLLocationManager
     let store = GeoNotificationStore()
+    let defaults = UserDefaults.standard
+    let operationQueue = DispatchQueue(label: "com.cowbell.cordova.geofence.GeoNotificationManagerQueue")
+    private(set) var alwaysAuthorizationRequestCount = 0
     var snoozedFences = [String : Double]()
     var isActive = false
+    var pendingExitWorkItem: DispatchWorkItem?
+    let pendingExitAtKey = "com.cowbell.cordova.geofence.pendingExitAt"
+    let lastActiveInsideKey = "com.cowbell.cordova.geofence.lastActiveInside"
+    let exitDebounceSeconds: TimeInterval = 30
+    let maxMonitoredRegions = 20
     
     override init() {
+        var manager: CLLocationManager!
+        if Thread.isMainThread {
+            manager = CLLocationManager()
+        } else {
+            DispatchQueue.main.sync {
+                manager = CLLocationManager()
+            }
+        }
+        locationManager = manager
         log("GeoNotificationManager init")
         super.init()
-        locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-        
-		// comment to remove permissions
-         locationManager.requestAlwaysAuthorization()
+        performOnLocationManagerThread {
+            self.locationManager.delegate = self
+        }
         UNUserNotificationCenter.current().delegate = self
     }
     
     func registerPermissions() {
-        locationManager.requestAlwaysAuthorization()
+        alwaysAuthorizationRequestCount += 1
+        performOnLocationManagerThread {
+            self.locationManager.requestAlwaysAuthorization()
+        }
     }
 
-    func startUpdatingLocation() {
-        locationManager.startUpdatingLocation()
-        locationManager.startMonitoringSignificantLocationChanges()
+    func performSerialized(_ work: @escaping () -> Void) {
+        operationQueue.async(execute: work)
     }
-    
+
+    func performOnLocationManagerThread(_ work: @escaping () -> Void) {
+        if Thread.isMainThread {
+            work()
+            return
+        }
+        DispatchQueue.main.sync(execute: work)
+    }
+
+    func monitoredRegionsSnapshot() -> [CLRegion] {
+        var monitoredRegions: [CLRegion] = []
+        performOnLocationManagerThread {
+            monitoredRegions = Array(self.locationManager.monitoredRegions)
+        }
+        return monitoredRegions
+    }
+
+    func addOrUpdateGeoNotifications(_ geoNotifications: [JSON]) throws {
+        let watched = store.getAll() ?? []
+        var existingIds = Set(watched.map { $0["id"].stringValue })
+        let incomingIds = try validateIncomingGeofences(geoNotifications)
+        let newIds = incomingIds.subtracting(existingIds)
+        if existingIds.count + newIds.count > maxMonitoredRegions {
+            throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS can monitor at most \(maxMonitoredRegions) geofences"])
+        }
+
+        for geo in geoNotifications {
+            addOrUpdateGeoNotification(geo)
+            existingIds.insert(geo["id"].stringValue)
+        }
+
+        reconcileTrackingState()
+    }
+
+    func replaceGeoNotifications(_ geoNotifications: [JSON]) throws {
+        let previousGeofences = store.getAll() ?? []
+        let incomingIds = try validateIncomingGeofences(geoNotifications)
+        if incomingIds.count > maxMonitoredRegions {
+            throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS can monitor at most \(maxMonitoredRegions) geofences"])
+        }
+
+        removeAllGeoNotificationsInternal(notifyTransition: false)
+        for geo in geoNotifications {
+            addOrUpdateGeoNotification(geo)
+        }
+        reconcileTrackingState()
+
+        let watchedIds = Set((store.getAll() ?? []).map { $0["id"].stringValue })
+        if watchedIds != incomingIds {
+            removeAllGeoNotificationsInternal(notifyTransition: false)
+            for oldGeo in previousGeofences {
+                addOrUpdateGeoNotification(oldGeo)
+            }
+            reconcileTrackingState()
+            throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "replace operation failed and has been rolled back"])
+        }
+    }
+
+    func validateIncomingGeofences(_ geoNotifications: [JSON]) throws -> Set<String> {
+        var incomingIds = Set<String>()
+        for geo in geoNotifications {
+            let id = geo["id"].stringValue
+            if id.isEmpty {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Geofence id is required"])
+            }
+            if incomingIds.contains(id) {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Duplicate geofence id in request: \(id)"])
+            }
+            incomingIds.insert(id)
+
+            if geo["radius"].doubleValue <= 0 {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Geofence radius must be greater than 0 for id \(id)"])
+            }
+
+            let latitude = geo["latitude"].doubleValue
+            if latitude < -90 || latitude > 90 {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Geofence latitude must be between -90 and 90 for id \(id)"])
+            }
+
+            let longitude = geo["longitude"].doubleValue
+            if longitude < -180 || longitude > 180 {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Geofence longitude must be between -180 and 180 for id \(id)"])
+            }
+
+            let transitionType = geo["transitionType"].intValue
+            if transitionType != GeofenceTransitionEnter &&
+                transitionType != GeofenceTransitionExit &&
+                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit) &&
+                transitionType != GeofenceTransitionDwell &&
+                transitionType != (GeofenceTransitionEnter | GeofenceTransitionDwell) &&
+                transitionType != (GeofenceTransitionExit | GeofenceTransitionDwell) &&
+                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit | GeofenceTransitionDwell) {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Unsupported transitionType for id \(id)"])
+            }
+
+            if geo["startTime"].isExists() && parseDate(dateStr: geo["startTime"].stringValue) == nil {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid startTime for id \(id)"])
+            }
+
+            if geo["endTime"].isExists() && parseDate(dateStr: geo["endTime"].stringValue) == nil {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid endTime for id \(id)"])
+            }
+
+            if let start = parseDate(dateStr: geo["startTime"].string),
+               let end = parseDate(dateStr: geo["endTime"].string),
+               start >= end {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "startTime must be before endTime for id \(id)"])
+            }
+        }
+        return incomingIds
+    }
+
     func addOrUpdateGeoNotification(_ geoNotification: JSON) {
         var geoNotification = geoNotification
         log("GeoNotificationManager addOrUpdate")
@@ -301,10 +459,16 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
         region.notifyOnEntry = 0 != transitionType & 1
         region.notifyOnExit = 0 != transitionType & 2
 
-        geoNotification["isInside"] = false
+        if !geoNotification["isInside"].isExists() {
+            let existingInsideState = store.findById(id)?["isInside"].boolValue ?? false
+            geoNotification["isInside"] = existingInsideState
+        }
         //store
         store.addOrUpdate(geoNotification)
-        locationManager.startMonitoring(for: region)
+        performOnLocationManagerThread {
+            self.locationManager.startMonitoring(for: region)
+            self.locationManager.requestState(for: region)
+        }
     }
     
     func checkRequirements() -> (Bool, [String], [String]) {
@@ -319,12 +483,17 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             errors.append("Error: Locationservices not enabled")
         }
         
-        let authStatus: CLAuthorizationStatus
-        if #available(iOS 14.0, *) {
-            authStatus = locationManager.authorizationStatus
-        } else {
-            authStatus = CLLocationManager.authorizationStatus()
-        }
+        let authStatus: CLAuthorizationStatus = {
+            var status = CLLocationManager.authorizationStatus()
+            performOnLocationManagerThread {
+                if #available(iOS 14.0, *) {
+                    status = self.locationManager.authorizationStatus
+                } else {
+                    status = CLLocationManager.authorizationStatus()
+                }
+            }
+            return status
+        }()
 
         if authStatus != .authorizedAlways {
             if authStatus != .authorizedWhenInUse {
@@ -344,7 +513,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     }
     
     func getMonitoredRegion(_ id: String) -> CLRegion? {
-        for object in locationManager.monitoredRegions {
+        for object in monitoredRegionsSnapshot() {
             let region = object
             
             if (region.identifier == id) {
@@ -355,77 +524,105 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     }
     
     func removeGeoNotification(_ id: String) {
+        let wasInside = store.findById(id)?["isInside"].boolValue ?? false
         store.remove(id)
         let region = getMonitoredRegion(id)
         if (region != nil) {
             log("Stoping monitoring region \(id)")
-            locationManager.stopMonitoring(for: region!)
+            performOnLocationManagerThread {
+                self.locationManager.stopMonitoring(for: region!)
+            }
         }
         //resetting snoozed fence
         snoozeFence(id, duration: 0)
+        if wasInside {
+            reconcileTrackingState(triggerTransitionType: GeofenceTransitionExit)
+        }
     }
     
     func removeAllGeoNotifications() {
+        removeAllGeoNotificationsInternal(notifyTransition: true)
+    }
+
+    func removeAllGeoNotificationsInternal(notifyTransition: Bool) {
+        var removedActiveInside = false
+        if let allStored = store.getAll() {
+            removedActiveInside = allStored.contains { $0["isInside"].boolValue && isWithinTimeRange($0) }
+        }
         store.clear()
-        for object in locationManager.monitoredRegions {
+        for object in monitoredRegionsSnapshot() {
             let region = object
             log("Stoping monitoring region \(region.identifier)")
-            locationManager.stopMonitoring(for: region)
+            performOnLocationManagerThread {
+                self.locationManager.stopMonitoring(for: region)
+            }
+        }
+        if notifyTransition && removedActiveInside {
+            reconcileTrackingState(triggerTransitionType: GeofenceTransitionExit)
         }
     }
     
     func handleTransition(_ id: String, transitionType: Int) {
-        if var geoNotification = store.findById(id),
-            !isSnoozed(id),
-            isWithinTimeRange(geoNotification) {
-            geoNotification["transitionType"].int = transitionType
-            
-            if geoNotification["notification"].isExists() && canBeTriggered(geoNotification) {
-                notifyAbout(geoNotification)
+        if var geoNotification = store.findById(id) {
+            if transitionType == GeofenceTransitionEnter || transitionType == GeofenceTransitionDwell {
+                geoNotification["isInside"] = true
+            } else if transitionType == GeofenceTransitionExit {
+                geoNotification["isInside"] = false
             }
-            
-            if geoNotification["url"].isExists() {
-                log("Should post to " + geoNotification["url"].stringValue)
-                let url = URL(string: geoNotification["url"].stringValue)!
-                
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-                dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-                //formatter.locale = Locale(identifier: "en_US")
-                
-                let jsonDict = ["geofenceId": geoNotification["id"].stringValue, "transition": geoNotification["transitionType"].intValue == 1 ? "ENTER" : "EXIT", "date": dateFormatter.string(from: Date())]
-                let jsonData = try! JSONSerialization.data(withJSONObject: jsonDict, options: [])
-                
-                var request = URLRequest(url: url)
-                request.httpMethod = "post"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue(geoNotification["authorization"].stringValue, forHTTPHeaderField: "Authorization")
-                request.httpBody = jsonData
-                
-                let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
-                    if let error = error {
-                        print("error:", error)
-                        return
-                    }
-                    
-                    do {
-                        guard let data = data else { return }
-                        guard let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: AnyObject] else { return }
-                        print("json:", json)
-                    } catch {
-                        print("error:", error)
+            geoNotification["transitionType"].int = transitionType
+            store.addOrUpdate(geoNotification)
+            reconcileTrackingState(triggerTransitionType: transitionType)
+
+            if !isSnoozed(id) && isWithinTimeRange(geoNotification) {
+                if geoNotification["notification"].isExists() && canBeTriggered(geoNotification) {
+                    notifyAbout(geoNotification)
+                }
+
+                if geoNotification["url"].isExists() {
+                    log("Should post to " + geoNotification["url"].stringValue)
+                    if let url = URL(string: geoNotification["url"].stringValue) {
+                        let dateFormatter = DateFormatter()
+                        dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+                        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+                        //formatter.locale = Locale(identifier: "en_US")
+                        
+                        let jsonDict = ["geofenceId": geoNotification["id"].stringValue, "transition": geoNotification["transitionType"].intValue == 1 ? "ENTER" : "EXIT", "date": dateFormatter.string(from: Date())]
+                        let jsonData = try! JSONSerialization.data(withJSONObject: jsonDict, options: [])
+                        
+                        var request = URLRequest(url: url)
+                        request.httpMethod = "post"
+                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        request.setValue(geoNotification["authorization"].stringValue, forHTTPHeaderField: "Authorization")
+                        request.httpBody = jsonData
+                        
+                        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
+                            if let error = error {
+                                print("error:", error)
+                                return
+                            }
+                            
+                            do {
+                                guard let data = data else { return }
+                                guard let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: AnyObject] else { return }
+                                print("json:", json)
+                            } catch {
+                                print("error:", error)
+                            }
+                        }
+                        task.resume()
+                    } else {
+                        log("Invalid callback url for geofence \(id)")
                     }
                 }
-                
-                task.resume()
+
+                NotificationCenter.default.post(name: Notification.Name(rawValue: "handleTransition"), object: geoNotification.rawString(String.Encoding.utf8.rawValue, options: []))
             }
-            
-            NotificationCenter.default.post(name: Notification.Name(rawValue: "handleTransition"), object: geoNotification.rawString(String.Encoding.utf8.rawValue, options: []))
+        } else {
+            reconcileTrackingState(triggerTransitionType: transitionType)
         }
     }
     
     func canBeTriggered(_ geo: JSON) -> Bool {
-        let store = GeoNotificationStore()
         if(geo["notification"]["lastTriggered"].isExists() && geo["notification"]["frequency"].isExists()) {
             if(Int(NSDate().timeIntervalSince1970) < geo["notification"]["lastTriggered"].int! + geo["notification"]["frequency"].int!) {
                 log("Frequency control. Skip notification")
@@ -454,10 +651,140 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     }
     
     func parseDate(dateStr: String?) -> Date? {
+        guard let dateStr = dateStr else {
+            return nil
+        }
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
         dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return dateFormatter.date(from: dateStr!)
+        return dateFormatter.date(from: dateStr)
+    }
+
+    func reconcileMonitoredGeofencesAndState() {
+        if let allStored = store.getAll() {
+            for geo in allStored {
+                let id = geo["id"].stringValue
+                if id.isEmpty {
+                    continue
+                }
+
+                if getMonitoredRegion(id) == nil {
+                    let location = CLLocationCoordinate2DMake(
+                        geo["latitude"].doubleValue,
+                        geo["longitude"].doubleValue
+                    )
+                    let radius = geo["radius"].doubleValue as CLLocationDistance
+                    let region = CLCircularRegion(center: location, radius: radius, identifier: id)
+                    var transitionType = geo["transitionType"].intValue
+                    if transitionType == 0 {
+                        transitionType = GeofenceTransitionEnter | GeofenceTransitionExit
+                    }
+                    region.notifyOnEntry = 0 != transitionType & GeofenceTransitionEnter
+                    region.notifyOnExit = 0 != transitionType & GeofenceTransitionExit
+                    performOnLocationManagerThread {
+                        self.locationManager.startMonitoring(for: region)
+                    }
+                }
+
+                if let monitoredRegion = getMonitoredRegion(id) {
+                    performOnLocationManagerThread {
+                        self.locationManager.requestState(for: monitoredRegion)
+                    }
+                }
+            }
+        }
+
+        reconcileTrackingState()
+    }
+
+    func reconcileTrackingState(triggerTransitionType: Int? = nil) {
+        let hasActiveInsideGeofence = hasActiveInsideGeofence()
+        let wasActiveInside = defaults.bool(forKey: lastActiveInsideKey)
+
+        if triggerTransitionType == GeofenceTransitionExit && !hasActiveInsideGeofence {
+            schedulePendingExit()
+            return
+        }
+
+        if hasActiveInsideGeofence {
+            cancelPendingExit()
+        }
+
+        if let transitionType = triggerTransitionType {
+            postCompanionTransition(transitionType: transitionType, hasActiveInsideGeofence: hasActiveInsideGeofence)
+            defaults.set(hasActiveInsideGeofence, forKey: lastActiveInsideKey)
+            return
+        }
+
+        if hasActiveInsideGeofence && !wasActiveInside {
+            postCompanionTransition(transitionType: GeofenceTransitionEnter, hasActiveInsideGeofence: true)
+            defaults.set(true, forKey: lastActiveInsideKey)
+            return
+        }
+
+        if !hasActiveInsideGeofence && wasActiveInside {
+            if let pendingExitAt = defaults.object(forKey: pendingExitAtKey) as? TimeInterval,
+               pendingExitAt <= Date().timeIntervalSince1970 {
+                cancelPendingExit()
+                postCompanionTransition(transitionType: GeofenceTransitionExit, hasActiveInsideGeofence: false)
+                defaults.set(false, forKey: lastActiveInsideKey)
+            } else {
+                schedulePendingExit()
+            }
+        }
+    }
+
+    func hasActiveInsideGeofence() -> Bool {
+        if let allStored = store.getAll() {
+            for geo in allStored {
+                if geo["isInside"].boolValue && isWithinTimeRange(geo) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    func postCompanionTransition(transitionType: Int, hasActiveInsideGeofence: Bool) {
+        NotificationCenter.default.post(
+            name: Notification.Name(rawValue: AppGeofenceTrackingTransition),
+            object: nil,
+            userInfo: [
+                GeofenceTrackingTransitionTypeKey: transitionType,
+                GeofenceTrackingHasActiveInsideKey: hasActiveInsideGeofence
+            ]
+        )
+    }
+
+    func schedulePendingExit() {
+        let pendingExitAt = Date().timeIntervalSince1970 + exitDebounceSeconds
+        defaults.set(pendingExitAt, forKey: pendingExitAtKey)
+        pendingExitWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.performSerialized {
+                guard let scheduledExit = self.defaults.object(forKey: self.pendingExitAtKey) as? TimeInterval,
+                      scheduledExit <= Date().timeIntervalSince1970 else {
+                    return
+                }
+
+                if !self.hasActiveInsideGeofence() {
+                    self.postCompanionTransition(transitionType: GeofenceTransitionExit, hasActiveInsideGeofence: false)
+                    self.defaults.set(false, forKey: self.lastActiveInsideKey)
+                }
+                self.cancelPendingExit()
+            }
+        }
+
+        pendingExitWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + exitDebounceSeconds, execute: workItem)
+    }
+
+    func cancelPendingExit() {
+        pendingExitWorkItem?.cancel()
+        pendingExitWorkItem = nil
+        defaults.removeObject(forKey: pendingExitAtKey)
     }
     
     func notifyAbout(_ geo: JSON) {
@@ -527,8 +854,10 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         log("update location \(locations[0])")
-        if isActive {
-            checkTransition(locations[0])
+        performSerialized {
+            if self.isActive {
+                self.checkTransition(locations[0])
+            }
         }
     }
     
@@ -542,15 +871,15 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     
     func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         log("Entering region \(region.identifier)")
-        if !isActive {
-            handleTransition(region.identifier, transitionType: 1)
+        performSerialized {
+            self.handleTransition(region.identifier, transitionType: GeofenceTransitionEnter)
         }
     }
     
     func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         log("Exiting region \(region.identifier)")
-        if !isActive {
-            handleTransition(region.identifier, transitionType: 2)
+        performSerialized {
+            self.handleTransition(region.identifier, transitionType: GeofenceTransitionExit)
         }
     }
     
@@ -562,14 +891,35 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             
             log("Starting monitoring for region \(region) lat \(lat) lng \(lng) of radius \(radius)")
         }
+        performOnLocationManagerThread {
+            self.locationManager.requestState(for: region)
+        }
     }
     
     func locationManager(_ manager: CLLocationManager, didDetermineState state: CLRegionState, for region: CLRegion) {
         log("State for region " + region.identifier)
+        performSerialized {
+            guard var geoNotification = self.store.findById(region.identifier) else {
+                self.reconcileTrackingState()
+                return
+            }
+
+            let wasInside = geoNotification["isInside"].boolValue
+            let isInside = state == .inside
+            if wasInside != isInside {
+                geoNotification["isInside"] = isInside
+                self.store.addOrUpdate(geoNotification)
+                let transitionType = isInside ? GeofenceTransitionEnter : GeofenceTransitionExit
+                self.reconcileTrackingState(triggerTransitionType: transitionType)
+            } else {
+                self.reconcileTrackingState()
+            }
+        }
     }
     
     func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
-        log("Monitoring region " + region!.identifier + " failed \(error)" )
+        let regionId = region?.identifier ?? "<unknown>"
+        log("Monitoring region " + regionId + " failed \(error)" )
     }
     @available(iOS 10.0, *)
     func userNotificationCenter(_ center: UNUserNotificationCenter,
@@ -610,9 +960,13 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
                 NotificationCenter.default.post(name: Notification.Name(rawValue: "CDVLocalNotification"), object: data)
             }
         case "Snooze":
-            snoozeFence(response.notification.request.identifier, duration: 86400)
+            performSerialized {
+                self.snoozeFence(response.notification.request.identifier, duration: 86400)
+            }
         case "Delete":
-            snoozeFence(response.notification.request.identifier, duration: 300)
+            performSerialized {
+                self.snoozeFence(response.notification.request.identifier, duration: 300)
+            }
         default:
             log("Unknown action")
         }

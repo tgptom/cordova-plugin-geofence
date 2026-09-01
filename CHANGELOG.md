@@ -1,5 +1,9 @@
 # ChangeLog
 
+## Version 0.8.1 - Unreleased
+
+- Bump plugin version in package and plugin metadata for release preparation.
+
 ## Version 0.7.0 - 14.05.2017
 
 - Adding/removing geofences now throw errors correctly
