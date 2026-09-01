@@ -91,6 +91,7 @@ Plugin is written in Swift. All xcode project options to enable swift support ar
 
 This standalone geofence plugin does not add `UIBackgroundModes=location` for continuous tracking.
 Region monitoring is handled through Core Location geofencing APIs; if your app also needs continuous tracking, configure that in a companion background-geolocation plugin and app manifests.
+Time-window and delayed-exit reconciliation while iOS is suspended/terminated is best-effort and reconciles on supported wake events (`didEnterRegion`/`didExitRegion`/`requestState`/app activation).
 
 :warning: Swift 3 is not supported at the moment, the following preference has to be added in your project :
 
