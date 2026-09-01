@@ -13,7 +13,7 @@ import UserNotifications
 import CoreLocation
 
 let TAG = "GeofencePlugin"
-let PAPAGeofenceTrackingTransition = "PAPAGeofenceTrackingTransition"
+let AppGeofenceTrackingTransition = "AppGeofenceTrackingTransition"
 let GeofenceTrackingTransitionTypeKey = "transitionType"
 let GeofenceTrackingHasActiveInsideKey = "hasActiveInsideGeofence"
 let GeofenceTransitionEnter = 1
@@ -747,7 +747,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
 
     func postCompanionTransition(transitionType: Int, hasActiveInsideGeofence: Bool) {
         NotificationCenter.default.post(
-            name: Notification.Name(rawValue: PAPAGeofenceTrackingTransition),
+            name: Notification.Name(rawValue: AppGeofenceTrackingTransition),
             object: nil,
             userInfo: [
                 GeofenceTrackingTransitionTypeKey: transitionType,

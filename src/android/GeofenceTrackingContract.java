@@ -6,7 +6,7 @@ public final class GeofenceTrackingContract {
     public static final String COMPANION_HANDLER_CLASS = "com.marianhello.bgloc.GeofenceTransitionHandler";
     public static final String COMPANION_HANDLER_METHOD = "onGeofenceTransition";
 
-    public static final String IOS_TRANSITION_NOTIFICATION = "PAPAGeofenceTrackingTransition";
+    public static final String IOS_TRANSITION_NOTIFICATION = "AppGeofenceTrackingTransition";
     public static final String PAYLOAD_TRANSITION_TYPE = "transitionType";
     public static final String PAYLOAD_HAS_ACTIVE_INSIDE_GEOFENCE = "hasActiveInsideGeofence";
 

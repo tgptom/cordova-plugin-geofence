@@ -70,7 +70,7 @@ companion native transition bridge so the companion plugin can decide whether to
 Native bridge contract:
 
 - Android optional static callback: `com.marianhello.bgloc.GeofenceTransitionHandler.onGeofenceTransition(Context,int,boolean)`
-- iOS optional notification: `PAPAGeofenceTrackingTransition`
+- iOS optional notification: `AppGeofenceTrackingTransition`
 - Payload keys:
   - `transitionType` (`1=ENTER`, `2=EXIT`, `4=DWELL`)
   - `hasActiveInsideGeofence` (`true` when at least one currently-active monitored geofence is physically inside)
@@ -101,7 +101,7 @@ Time-window and delayed-exit reconciliation while iOS is suspended/terminated is
 2. Fully terminate the app (swipe away from app switcher).
 3. Move device/simulator across the region boundary to trigger enter/exit.
 4. Confirm iOS relaunches the app in the background for the location event.
-5. Confirm native reconciliation runs (`requestState` + stored state update), and a companion bridge notification (`PAPAGeofenceTrackingTransition`) is posted when installed.
+5. Confirm native reconciliation runs (`requestState` + stored state update), and a companion bridge notification (`AppGeofenceTrackingTransition`) is posted when installed.
 6. Confirm this relaunch path does **not** show a new location permission prompt.
 7. Confirm standalone behavior still works when companion plugin is absent (local geofence notification and no crash).
 
