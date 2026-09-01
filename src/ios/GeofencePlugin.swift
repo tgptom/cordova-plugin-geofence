@@ -379,6 +379,41 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             if geo["radius"].doubleValue <= 0 {
                 throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Geofence radius must be greater than 0 for id \(id)"])
             }
+
+            let latitude = geo["latitude"].doubleValue
+            if latitude < -90 || latitude > 90 {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Geofence latitude must be between -90 and 90 for id \(id)"])
+            }
+
+            let longitude = geo["longitude"].doubleValue
+            if longitude < -180 || longitude > 180 {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Geofence longitude must be between -180 and 180 for id \(id)"])
+            }
+
+            let transitionType = geo["transitionType"].intValue
+            if transitionType != GeofenceTransitionEnter &&
+                transitionType != GeofenceTransitionExit &&
+                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit) &&
+                transitionType != GeofenceTransitionDwell &&
+                transitionType != (GeofenceTransitionEnter | GeofenceTransitionDwell) &&
+                transitionType != (GeofenceTransitionExit | GeofenceTransitionDwell) &&
+                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit | GeofenceTransitionDwell) {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Unsupported transitionType for id \(id)"])
+            }
+
+            if geo["startTime"].isExists() && parseDate(dateStr: geo["startTime"].stringValue) == nil {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid startTime for id \(id)"])
+            }
+
+            if geo["endTime"].isExists() && parseDate(dateStr: geo["endTime"].stringValue) == nil {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid endTime for id \(id)"])
+            }
+
+            if let start = parseDate(dateStr: geo["startTime"].string),
+               let end = parseDate(dateStr: geo["endTime"].string),
+               start >= end {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "startTime must be before endTime for id \(id)"])
+            }
         }
         return incomingIds
     }
@@ -593,10 +628,13 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     }
     
     func parseDate(dateStr: String?) -> Date? {
+        guard let dateStr = dateStr else {
+            return nil
+        }
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
         dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return dateFormatter.date(from: dateStr!)
+        return dateFormatter.date(from: dateStr)
     }
 
     func reconcileMonitoredGeofencesAndState() {
