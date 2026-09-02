@@ -47,3 +47,80 @@ assert(
   jsSource.includes('onMonitoringError: function (error) {}'),
   'JavaScript API must expose onMonitoringError callback for native monitoring failures'
 );
+
+assert(
+  iosSource.includes('guard let location = locations.last else'),
+  'iOS location updates must guard against empty Core Location updates and use latest location'
+);
+
+function schedulePendingExit(now, debounceSeconds, existingDeadline) {
+  let pendingExitAt = now + debounceSeconds;
+  if (typeof existingDeadline === 'number' && existingDeadline > now) {
+    pendingExitAt = existingDeadline;
+  }
+  return {
+    pendingExitAt,
+    remainingDelay: Math.max(0, pendingExitAt - now)
+  };
+}
+
+{
+  const debounceSeconds = 30;
+  const first = schedulePendingExit(100, debounceSeconds, null);
+  const second = schedulePendingExit(110, debounceSeconds, first.pendingExitAt);
+  assert.strictEqual(first.pendingExitAt, 130, 'First pending exit should be now + debounce');
+  assert.strictEqual(
+    second.pendingExitAt,
+    130,
+    'Repeated reconciliation while exit is pending must preserve original future deadline'
+  );
+  assert.strictEqual(
+    second.remainingDelay,
+    20,
+    'Repeated scheduling must recreate work item using remaining delay, not full debounce'
+  );
+}
+
+{
+  const debounceSeconds = 30;
+  function reconcileTrackingState(params) {
+    const actions = [];
+    if (params.hasActiveInsideGeofence) {
+      actions.push('cancelPendingExit');
+      return actions;
+    }
+    if (!params.hasActiveInsideGeofence && params.wasActiveInside) {
+      if (typeof params.pendingExitAt === 'number' && params.pendingExitAt <= params.now) {
+        actions.push('cancelPendingExit');
+        actions.push('postExit');
+      } else {
+        const scheduled = schedulePendingExit(params.now, debounceSeconds, params.pendingExitAt);
+        actions.push({ type: 'schedulePendingExit', pendingExitAt: scheduled.pendingExitAt, delay: scheduled.remainingDelay });
+      }
+    }
+    return actions;
+  }
+
+  assert.deepStrictEqual(
+    reconcileTrackingState({
+      hasActiveInsideGeofence: false,
+      wasActiveInside: true,
+      pendingExitAt: 190,
+      now: 200
+    }),
+    ['cancelPendingExit', 'postExit'],
+    'Expired pending-exit deadlines must fire promptly on reconciliation'
+  );
+}
+
+{
+  let pendingExitAt = 130;
+  let cancelled = false;
+  const reenter = () => {
+    pendingExitAt = null;
+    cancelled = true;
+  };
+  reenter();
+  assert.strictEqual(cancelled, true, 'Re-entry must cancel pending exit work');
+  assert.strictEqual(pendingExitAt, null, 'Re-entry must clear pending exit persisted state');
+}

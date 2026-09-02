@@ -834,7 +834,15 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     }
 
     func schedulePendingExit() {
-        let pendingExitAt = Date().timeIntervalSince1970 + exitDebounceSeconds
+        let now = Date().timeIntervalSince1970
+        let existingDeadline = defaults.object(forKey: pendingExitAtKey) as? TimeInterval
+        let pendingExitAt: TimeInterval
+        if let deadline = existingDeadline, deadline > now {
+            pendingExitAt = deadline
+        } else {
+            pendingExitAt = now + exitDebounceSeconds
+        }
+        let remainingDelay = max(0, pendingExitAt - now)
         defaults.set(pendingExitAt, forKey: pendingExitAtKey)
         pendingExitWorkItem?.cancel()
 
@@ -855,7 +863,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
         }
 
         pendingExitWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + exitDebounceSeconds, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + remainingDelay, execute: workItem)
     }
 
     func cancelPendingExit() {
@@ -970,10 +978,15 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     }
     
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        log("update location \(locations[0])")
+        guard let location = locations.last else {
+            log("update location skipped: no locations provided")
+            return
+        }
+
+        log("update location \(location)")
         performSerialized {
             if self.isActive {
-                self.checkTransition(locations[0])
+                self.checkTransition(location)
             }
         }
     }
