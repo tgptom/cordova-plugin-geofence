@@ -1,7 +1,5 @@
 # Cordova Geofence Plugin
 
-[![version](https://badge.fury.io/js/cordova-plugin-geofence.png)](https://badge.fury.io/js/cordova-plugin-geofence)
-
 Plugin to monitor circular geofences using mobile devices. The purpose is to notify user if crossing the boundary of the monitored geofence.
 
 *Geofences persist after device reboot. You do not have to open your app first to monitor added geofences*
