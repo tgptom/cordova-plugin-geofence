@@ -170,6 +170,7 @@ All methods returning promises, but you can also use standard callback functions
 
 For listening of geofence transistion you can override onTransitionReceived method
 - `window.geofence.onTransitionReceived(geofences)`
+- `window.geofence.onMonitoringError(error)` (iOS; monitoring failures surfaced from native Core Location)
 
 ## Constants
 

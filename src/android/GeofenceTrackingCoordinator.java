@@ -153,7 +153,13 @@ public class GeofenceTrackingCoordinator {
     }
 
     private void scheduleExitDebounce() {
-        long triggerAt = System.currentTimeMillis() + EXIT_DEBOUNCE_MS;
+        long now = System.currentTimeMillis();
+        long existingPendingExitAt = preferences.getLong(PREF_PENDING_EXIT_AT, -1L);
+
+        long triggerAt = existingPendingExitAt > now
+                ? existingPendingExitAt
+                : now + EXIT_DEBOUNCE_MS;
+
         preferences.edit().putLong(PREF_PENDING_EXIT_AT, triggerAt).apply();
         scheduleAlarm(REASON_EXIT_DEBOUNCE, triggerAt, WINDOW_ALARM_FLEX_MS);
     }
