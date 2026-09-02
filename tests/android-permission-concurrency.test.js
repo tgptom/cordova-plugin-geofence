@@ -30,10 +30,30 @@ assert(
   source.includes('REQUEST_NOTIFICATION_PERMISSION'),
   'Android plugin must use a dedicated request code for notification stage'
 );
+assert(
+  source.includes('REQUEST_BACKGROUND_LOCATION_SETTINGS'),
+  'Android plugin must use a dedicated request code for Android 11+ settings handoff'
+);
+assert(
+  source.includes('onResume(boolean multitasking)'),
+  'Android plugin must re-check permissions when returning from settings'
+);
 
 assert(
   source.includes('requestNextInitializePermissionStage'),
   'Android plugin must run initialize permission flow through staged progression'
+);
+assert(
+  source.includes('INITIALIZE_PERMISSION_TIMEOUT_MS'),
+  'Android plugin must enforce deterministic timeout for initialize permission flow'
+);
+assert(
+  source.includes('BACKGROUND_LOCATION_NOT_GRANTED_IN_SETTINGS'),
+  'Android plugin must return a clear error when Android 11+ settings flow does not grant background location'
+);
+assert(
+  source.includes('Notification permission denied. Geofence monitoring continues'),
+  'Android plugin must treat POST_NOTIFICATIONS denial as non-fatal'
 );
 
 function createFlowHarness(options) {
@@ -47,6 +67,7 @@ function createFlowHarness(options) {
   const REQUEST_FOREGROUND_LOCATION = 2001;
   const REQUEST_BACKGROUND_LOCATION = 2002;
   const REQUEST_NOTIFICATION_PERMISSION = 2003;
+  const REQUEST_BACKGROUND_LOCATION_SETTINGS = 2004;
 
   const queue = [];
   const callbackSettlements = [];
@@ -76,7 +97,11 @@ function createFlowHarness(options) {
       return;
     }
     if (cfg.sdk > 28 && !state.background) {
-      state.requests.push(REQUEST_BACKGROUND_LOCATION);
+      if (cfg.sdk === 29) {
+        state.requests.push(REQUEST_BACKGROUND_LOCATION);
+      } else {
+        state.requests.push(REQUEST_BACKGROUND_LOCATION_SETTINGS);
+      }
       return;
     }
     if (cfg.sdk >= 33 && !state.notifications) {
@@ -110,7 +135,7 @@ function createFlowHarness(options) {
         settleQueue({ ok: false, reason: 'MALFORMED_GRANT_RESULTS' });
         return;
       }
-      if (grantResults.some((result) => result !== 'granted')) {
+      if (grantResults.some((result) => result !== 'granted') && requestCode !== REQUEST_NOTIFICATION_PERMISSION) {
         settleQueue({ ok: false, reason: 'PERMISSION_DENIED' });
         return;
       }
@@ -120,6 +145,11 @@ function createFlowHarness(options) {
         state.background = true;
       } else if (requestCode === REQUEST_NOTIFICATION_PERMISSION) {
         state.notifications = true;
+      } else if (requestCode === REQUEST_BACKGROUND_LOCATION_SETTINGS) {
+        if (!state.background) {
+          settleQueue({ ok: false, reason: 'BACKGROUND_LOCATION_NOT_GRANTED_IN_SETTINGS' });
+          return;
+        }
       } else {
         return;
       }
@@ -140,17 +170,32 @@ function createFlowHarness(options) {
   flow.onPermissionResult(2001, ['granted', 'granted']);
   assert.deepStrictEqual(
     flow.state.requests,
-    [2001, 2002],
-    'Background permission must be requested only after foreground permission succeeds'
+    [2001, 2004],
+    'Android 11+ background location must hand off to app settings after foreground permission succeeds'
   );
-  flow.onPermissionResult(2002, ['granted']);
+  flow.state.background = true;
+  flow.onPermissionResult(2004, ['granted']);
   assert.deepStrictEqual(
     flow.state.requests,
-    [2001, 2002, 2003],
+    [2001, 2004, 2003],
     'Notification permission must be requested as a separate final stage on Android 13+'
   );
   flow.onPermissionResult(2003, ['granted']);
   assert.deepStrictEqual(flow.callbackSettlements, [{ ok: true }]);
+}
+
+{
+  const flow = createFlowHarness({ sdk: 34 });
+  flow.initialize();
+  flow.onPermissionResult(2001, ['granted', 'granted']);
+  flow.state.background = true;
+  flow.onPermissionResult(2004, ['granted']);
+  flow.onPermissionResult(2003, ['denied']);
+  assert.deepStrictEqual(
+    flow.callbackSettlements,
+    [{ ok: true }],
+    'Notification denial must not fail geofence initialization'
+  );
 }
 
 {
@@ -163,11 +208,23 @@ function createFlowHarness(options) {
     'Concurrent initialize calls must share one in-flight permission flow'
   );
   flow.onPermissionResult(2001, ['granted', 'granted']);
-  flow.onPermissionResult(2002, ['granted']);
-  flow.onPermissionResult(2003, ['granted']);
+  flow.state.background = true;
+  flow.onPermissionResult(2004, ['granted']);
+  flow.onPermissionResult(2003, ['denied']);
   assert.strictEqual(callbackA.settled, true, 'First initialize callback must settle');
   assert.strictEqual(callbackB.settled, true, 'Second initialize callback must settle');
   assert.strictEqual(flow.callbackSettlements.length, 2, 'All queued initialize callbacks must settle exactly once');
+}
+
+{
+  const flow = createFlowHarness({ sdk: 29 });
+  flow.initialize();
+  flow.onPermissionResult(2001, ['granted', 'granted']);
+  assert.deepStrictEqual(
+    flow.state.requests,
+    [2001, 2002],
+    'Android 10 must request ACCESS_BACKGROUND_LOCATION as a separate runtime prompt'
+  );
 }
 
 {

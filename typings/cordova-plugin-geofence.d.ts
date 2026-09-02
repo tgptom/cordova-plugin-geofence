@@ -14,7 +14,7 @@ interface GeofencePlugin {
   initialize(
     successCallback?: (result: any) => void,
     errorCallback?: (error: string) => void
-  ): Promise<any>;
+  ): Promise<InitializeResult>;
 
   addOrUpdate(
     geofence: Geofence | Geofence[],
@@ -68,9 +68,24 @@ interface Geofence {
   longitude: number;
   radius: number;
   transitionType: number;
+  /**
+   * Android only: set true to allow http:// transition callback URLs for development.
+   * HTTPS is required by default.
+   */
+  allowInsecureHttp?: boolean;
   startTime?: Date;
   endTime?: Date;
   notification?: Notification;
+}
+
+interface InitializeResult {
+  locationPermissionGranted: boolean;
+  backgroundLocationPermissionGranted: boolean;
+  notificationPermissionRequired: boolean;
+  notificationPermissionGranted: boolean;
+  preciseLocationRequired: boolean;
+  preciseLocationGranted: boolean;
+  warnings: string[];
 }
 
 interface Notification {

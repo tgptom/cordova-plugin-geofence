@@ -56,6 +56,7 @@ module.exports = {
         geofences.forEach(coerceProperties);
 
         if (isIOS) {
+            geofences.forEach(ensureIOSSupportedTransitionType);
             return addOrUpdateIOS(geofences, success, error);
         }
 
@@ -89,6 +90,8 @@ module.exports = {
             }
             return Promise.reject(reason);
         }
+
+        geofences.forEach(ensureIOSSupportedTransitionType);
 
         return execPromise(success, error, "GeofencePlugin", "replace", [geofences]);
     },
@@ -336,6 +339,12 @@ function isInt(n){
 function ensureInRange(name, value, min, max) {
     if (value < min || value > max) {
         throw new Error(name + " out of range");
+    }
+}
+
+function ensureIOSSupportedTransitionType(geofence) {
+    if (geofence.transitionType & 4) {
+        throw new Error("TransitionType.DWELL is not supported on iOS (Core Location geofencing supports ENTER/EXIT only)");
     }
 }
 

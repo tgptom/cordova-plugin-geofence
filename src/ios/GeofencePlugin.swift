@@ -20,9 +20,13 @@ let GeofenceMonitoringErrorNotification = "handleMonitoringError"
 let GeofenceTransitionEnter = 1
 let GeofenceTransitionExit = 2
 let GeofenceTransitionDwell = 4
+let GeofenceDebugLoggingEnabledKey = "com.cowbell.cordova.geofence.debugLogging"
+let GeofenceAllowInsecureHttpCallbacksKey = "com.cowbell.cordova.geofence.allowInsecureHttpCallbacks"
 
 func log(_ message: String){
-    NSLog("%@ - %@", TAG, message)
+    if UserDefaults.standard.bool(forKey: GeofenceDebugLoggingEnabledKey) {
+        NSLog("%@ - %@", TAG, message)
+    }
 }
 
 func log(_ messages: [String]) {
@@ -33,6 +37,11 @@ func log(_ messages: [String]) {
 
 @objc(HWPGeofencePlugin) class GeofencePlugin : CDVPlugin {
     lazy var geoNotificationManager = GeoNotificationManager()
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        geoNotificationManager.releaseNotificationDelegate()
+    }
     
     override func pluginInitialize () {
         NotificationCenter.default.addObserver(
@@ -351,6 +360,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     let lastActiveInsideKey = "com.cowbell.cordova.geofence.lastActiveInside"
     let exitDebounceSeconds: TimeInterval = 30
     let maxMonitoredRegions = 20
+    weak var previousNotificationDelegate: UNUserNotificationCenterDelegate?
     
     override init() {
         var manager: CLLocationManager!
@@ -367,7 +377,27 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
         performOnLocationManagerThread {
             self.locationManager.delegate = self
         }
-        UNUserNotificationCenter.current().delegate = self
+        installNotificationDelegate()
+    }
+
+    deinit {
+        releaseNotificationDelegate()
+    }
+
+    func installNotificationDelegate() {
+        let center = UNUserNotificationCenter.current()
+        if center.delegate !== self {
+            previousNotificationDelegate = center.delegate
+            center.delegate = self
+        }
+    }
+
+    func releaseNotificationDelegate() {
+        let center = UNUserNotificationCenter.current()
+        if center.delegate === self {
+            center.delegate = previousNotificationDelegate
+        }
+        previousNotificationDelegate = nil
     }
     
     func registerPermissions() {
@@ -465,13 +495,15 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             }
 
             let transitionType = geo["transitionType"].intValue
+            if transitionType == GeofenceTransitionDwell
+                || transitionType == (GeofenceTransitionEnter | GeofenceTransitionDwell)
+                || transitionType == (GeofenceTransitionExit | GeofenceTransitionDwell)
+                || transitionType == (GeofenceTransitionEnter | GeofenceTransitionExit | GeofenceTransitionDwell) {
+                throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "transitionType DWELL is not supported on iOS because Core Location region monitoring only supports ENTER/EXIT"])
+            }
             if transitionType != GeofenceTransitionEnter &&
                 transitionType != GeofenceTransitionExit &&
-                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit) &&
-                transitionType != GeofenceTransitionDwell &&
-                transitionType != (GeofenceTransitionEnter | GeofenceTransitionDwell) &&
-                transitionType != (GeofenceTransitionExit | GeofenceTransitionDwell) &&
-                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit | GeofenceTransitionDwell) {
+                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit) {
                 throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Unsupported transitionType for id \(id)"])
             }
 
@@ -505,7 +537,6 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             geoNotification["latitude"].doubleValue,
             geoNotification["longitude"].doubleValue
         )
-        log("AddOrUpdate geo: \(geoNotification)")
         let radius = geoNotification["radius"].doubleValue as CLLocationDistance
         let id = geoNotification["id"].stringValue
         
@@ -638,8 +669,13 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
                 }
 
                 if geoNotification["url"].isExists() {
-                    log("Should post to " + geoNotification["url"].stringValue)
                     if let url = URL(string: geoNotification["url"].stringValue) {
+                        let allowInsecureHttp = defaults.bool(forKey: GeofenceAllowInsecureHttpCallbacksKey)
+                        if url.scheme?.lowercased() == "http" && !allowInsecureHttp {
+                            log("Blocked insecure HTTP transition callback URL")
+                        } else if url.scheme?.lowercased() != "http" && url.scheme?.lowercased() != "https" {
+                            log("Blocked unsupported transition callback URL scheme")
+                        } else {
                         let dateFormatter = DateFormatter()
                         dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
                         dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
@@ -667,19 +703,17 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
                         
                         let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
                             if let error = error {
-                                print("error:", error)
+                                log("Transition callback request failed: \(error.localizedDescription)")
                                 return
                             }
-                            
-                            do {
-                                guard let data = data else { return }
-                                guard let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: AnyObject] else { return }
-                                print("json:", json)
-                            } catch {
-                                print("error:", error)
+
+                            if let httpResponse = response as? HTTPURLResponse,
+                               !(200...299).contains(httpResponse.statusCode) {
+                                log("Transition callback request returned status \(httpResponse.statusCode)")
                             }
                         }
                         task.resume()
+                        }
                     } else {
                         log("Invalid callback url for geofence \(id)")
                     }
@@ -1074,15 +1108,18 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             } else {
                 completionHandler([.alert, .sound])
             }
-        } else if (notification.request.content.userInfo["foreground"] != nil) {
-            // Play sound and show alert to the user if the notification has foreground property
-            if #available(iOS 14.0, *) {
-                completionHandler([.banner, .sound])
-            } else {
-                completionHandler([.alert, .sound])
-            }
         } else {
-            completionHandler([])
+            if let previousDelegate = previousNotificationDelegate,
+               previousDelegate !== self,
+               previousDelegate.responds(to: #selector(UNUserNotificationCenterDelegate.userNotificationCenter(_:willPresent:withCompletionHandler:))) {
+                previousDelegate.userNotificationCenter?(
+                    center,
+                    willPresent: notification,
+                    withCompletionHandler: completionHandler
+                )
+            } else {
+                completionHandler([])
+            }
         }
     }
     
@@ -1090,15 +1127,29 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        
+        let hasGeofencePayload = response.notification.request.content.userInfo["geofence.notification.data"] != nil
+        let geofenceAction = response.actionIdentifier == "Snooze" || response.actionIdentifier == "Delete"
+        if !hasGeofencePayload && !geofenceAction {
+            if let previousDelegate = previousNotificationDelegate,
+               previousDelegate !== self,
+               previousDelegate.responds(to: #selector(UNUserNotificationCenterDelegate.userNotificationCenter(_:didReceive:withCompletionHandler:))) {
+                previousDelegate.userNotificationCenter?(
+                    center,
+                    didReceive: response,
+                    withCompletionHandler: completionHandler
+                )
+            } else {
+                completionHandler()
+            }
+            return
+        }
+
         // Determine the user action
-        log(response.actionIdentifier)
         switch response.actionIdentifier {
         case UNNotificationDismissActionIdentifier:
             log("Dismiss Action")
         case UNNotificationDefaultActionIdentifier:
             if let data = response.notification.request.content.userInfo["geofence.notification.data"] {
-                log("userNotificationCenter didReceive: \(data)")
                 NotificationCenter.default.post(name: Notification.Name(rawValue: "CDVLocalNotification"), object: data)
             }
         case "Snooze":
@@ -1141,7 +1192,6 @@ class GeoNotificationStore {
     }
     
     func addOrUpdate(_ geoNotification: JSON) {
-        NSLog("geoNotification.description: %@", geoNotification.description)
         if (findById(geoNotification["id"].stringValue) != nil) {
             update(geoNotification)
         }

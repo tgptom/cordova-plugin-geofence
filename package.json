@@ -6,19 +6,20 @@
     "id": "cordova-plugin-geofence",
     "platforms": [
       "android",
-      "ios",
-      "windows"
+      "ios"
     ]
   },
   "scripts": {
-    "test:ios": "FIX_PARAMEDIC=true cordova-paramedic --platform ios --plugin . --verbose",
-    "pretest": "sed -i 's/play-services-location:+/play-services-location:9.8.0/g' plugin.xml",
-    "test": "cordova-paramedic --platform android@6.0 --plugin . --verbose",
-    "posttest": "sed -i 's/play-services-location:9.8.0/play-services-location:+/g' plugin.xml"
+    "lint": "jshint -c tests/.jshintrc tests/android-webhook-hardening.test.js tests/ios-permission-contract.test.js",
+    "test:js": "node tests/android-security-port.test.js && node tests/android-permission-concurrency.test.js && node tests/android-coordinator-debounce.test.js && node tests/ios-transition-persistence.test.js && node tests/contract-notification-name.test.js && node tests/android-webhook-hardening.test.js && node tests/ios-permission-contract.test.js",
+    "test:android": "cordova-paramedic --platform android --plugin . --verbose",
+    "test:ios": "cordova-paramedic --platform ios --plugin . --verbose",
+    "pack:check": "npm pack --dry-run",
+    "test": "npm run lint && npm run test:js"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cowbell/cordova-plugin-geofence.git"
+    "url": "git+https://github.com/tgptom/cordova-plugin-geofence.git"
   },
   "keywords": [
     "cordova",
@@ -26,17 +27,14 @@
     "geofence",
     "ecosystem:cordova",
     "cordova-android",
-    "cordova-ios",
-    "cordova-wp8",
-    "cordova-windows8",
-    "cordova-windows"
+    "cordova-ios"
   ],
   "author": "Cowbell Labs",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/cowbell/cordova-plugin-geofence/issues"
+    "url": "https://github.com/tgptom/cordova-plugin-geofence/issues"
   },
-  "homepage": "https://github.com/cowbell/cordova-plugin-geofence#readme",
+  "homepage": "https://github.com/tgptom/cordova-plugin-geofence#readme",
   "engines": [
     {
       "name": "cordova",
@@ -45,7 +43,10 @@
   ],
   "typings": "./typings/cordova-plugin-geofence.d.ts",
   "devDependencies": {
-    "cordova": "^6.1.1",
+    "cordova": "^12.0.0",
+    "cordova-android": "^13.0.0",
+    "cordova-ios": "^7.1.0",
+    "jshint": "^2.13.6",
     "cordova-paramedic": "https://github.com/apache/cordova-paramedic"
   }
 }

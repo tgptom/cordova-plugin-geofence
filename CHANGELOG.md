@@ -3,6 +3,10 @@
 ## Version 0.8.1 - Unreleased
 
 - Bump plugin version in package and plugin metadata for release preparation.
+- Android initialize permissions now use staged foreground/background flow, with Android 11+ app-settings handoff for "Allow all the time", timeout/cancellation handling, and optional notification permission on Android 13+.
+- Android transition webhooks now use safe JSON payload serialization, URL scheme validation (HTTPS by default; HTTP opt-in for development), bounded retries, and unique JobScheduler IDs per transition.
+- iOS now rejects DWELL transition configuration (Core Location geofencing supports only ENTER/EXIT), and notification delegate handling forwards unrelated notifications to previously installed delegates.
+- Removed unsupported Windows/WP8 plugin metadata/artifacts from package contents.
 
 ## Version 0.7.0 - 14.05.2017
 

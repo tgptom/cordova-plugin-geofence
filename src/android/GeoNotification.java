@@ -19,6 +19,7 @@ public class GeoNotification {
 
     @Expose public String url;
     @Expose public String authorization;
+    @Expose public boolean allowInsecureHttp;
     @Expose public String startTime;
     @Expose public String endTime;
 

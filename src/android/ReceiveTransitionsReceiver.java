@@ -3,6 +3,7 @@ package com.cowbell.cordova.geofence;
 import android.app.NotificationManager;
 import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
+import android.content.SharedPreferences;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -23,6 +24,8 @@ import java.util.TimeZone;
 // https://codelabs.developers.google.com/codelabs/background-location-updates-android-o/#4
 public class ReceiveTransitionsReceiver extends BroadcastReceiver {
     protected static final String GeofenceTransitionIntent = "com.cowbell.cordova.geofence.TRANSITION";
+    private static final String JOB_ID_PREFERENCES = "com.cowbell.cordova.geofence.jobs";
+    private static final String JOB_ID_COUNTER_KEY = "webhookJobIdCounter";
     protected BeepHelper beepHelper;
     protected GeoNotificationNotifier notifier;
     protected GeoNotificationStore store;
@@ -136,6 +139,7 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
                     bundle.putString("id", geoNotification.id);
                     bundle.putString("url", geoNotification.url);
                     bundle.putString("authorization", geoNotification.authorization);
+                    bundle.putBoolean(TransitionJobService.KEY_ALLOW_INSECURE_HTTP, geoNotification.allowInsecureHttp);
                     bundle.putString("transition", transition);
 
 					TimeZone tz = TimeZone.getTimeZone("UTC");
@@ -143,20 +147,35 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
 					df.setTimeZone(tz);
                     bundle.putString("date", df.format(new Date()));
 
-                    Log.i(GeofencePlugin.TAG, "Scheduling job for " + geoNotification.toJson());
-
+                    int jobId = nextWebhookJobId(context);
+                    bundle.putInt(TransitionJobService.KEY_ATTEMPT, 0);
+                    bundle.putInt(TransitionJobService.KEY_JOB_ID, jobId);
                     JobScheduler jobScheduler =
-                            (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
-                    jobScheduler.schedule(
-                            new JobInfo.Builder(1, new ComponentName(context, TransitionJobService.class))
-                                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                                    .setExtras(bundle)
-                                    .build()
-                    );
+                        (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+                    if (jobScheduler != null) {
+                        jobScheduler.schedule(
+                            new JobInfo.Builder(jobId, new ComponentName(context, TransitionJobService.class))
+                                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                                .setBackoffCriteria(TransitionJobService.RETRY_BACKOFF_MS, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
+                                .setExtras(bundle)
+                                .build()
+                        );
+                    }
                 }
             }
         }
 
+    }
+
+    private int nextWebhookJobId(Context context) {
+        SharedPreferences preferences = context.getSharedPreferences(JOB_ID_PREFERENCES, Context.MODE_PRIVATE);
+        int previous = preferences.getInt(JOB_ID_COUNTER_KEY, 20000);
+        int next = previous + 1;
+        if (next < 20000) {
+            next = 20000;
+        }
+        preferences.edit().putInt(JOB_ID_COUNTER_KEY, next).apply();
+        return next;
     }
 
     private void updateLastTriggeredByNotificationId(int id, List<GeoNotification> geoList) {
