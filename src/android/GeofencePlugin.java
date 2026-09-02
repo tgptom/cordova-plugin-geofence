@@ -32,6 +32,12 @@ public class GeofencePlugin extends CordovaPlugin {
     public static final String ERROR_PERMISSION_DENIED = "PERMISSION_DENIED";
     public static final String ERROR_GEOFENCE_NOT_AVAILABLE = "GEOFENCE_NOT_AVAILABLE";
     public static final String ERROR_GEOFENCE_LIMIT_EXCEEDED = "GEOFENCE_LIMIT_EXCEEDED";
+    private static final int REQUEST_FOREGROUND_LOCATION = 2001;
+    private static final int REQUEST_BACKGROUND_LOCATION = 2002;
+    private static final int REQUEST_NOTIFICATION_PERMISSION = 2003;
+    private static final String STAGE_FOREGROUND_LOCATION = "foreground_location";
+    private static final String STAGE_BACKGROUND_LOCATION = "background_location";
+    private static final String STAGE_NOTIFICATIONS = "notifications";
 
     private static HashMap<String, Long> snoozedFences = new HashMap<>();
 
@@ -55,6 +61,7 @@ public class GeofencePlugin extends CordovaPlugin {
     private final Object permissionRequestMutex = new Object();
     private final List<CallbackContext> pendingInitializeCallbacks = new CopyOnWriteArrayList<>();
     private boolean isPermissionRequestInFlight = false;
+    private volatile boolean isPluginDestroyed = false;
 
     /**
      * @param cordova
@@ -131,6 +138,20 @@ public class GeofencePlugin extends CordovaPlugin {
         return true;
     }
 
+    @Override
+    public void onDestroy() {
+        isPluginDestroyed = true;
+        failPendingInitializeCallbacks(buildPermissionError(
+            ERROR_UNKNOWN,
+            "Plugin destroyed before initialization completed",
+            null,
+            null,
+            "PLUGIN_DESTROYED",
+            -1
+        ));
+        super.onDestroy();
+    }
+
     public boolean execute(Action action) throws JSONException {
         return execute(action.action, action.args, action.callbackContext);
     }
@@ -175,31 +196,38 @@ public class GeofencePlugin extends CordovaPlugin {
     }
 
     private void initialize(CallbackContext callbackContext) {
-        ArrayList<String> permissionList = new ArrayList<String>();
-        permissionList.add(Manifest.permission.ACCESS_COARSE_LOCATION);
-        permissionList.add(Manifest.permission.ACCESS_FINE_LOCATION);
-        if (android.os.Build.VERSION.SDK_INT > 28) {
-            permissionList.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
+        if (callbackContext == null) {
+            return;
         }
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            permissionList.add(Manifest.permission.POST_NOTIFICATIONS);
-        }
-        String[] permissions = permissionList.toArray(new String[0]);
-        if (!hasPermissions(permissions)) {
-            pendingInitializeCallbacks.add(callbackContext);
 
-            boolean shouldRequestPermissions = false;
-            synchronized (permissionRequestMutex) {
-                if (!isPermissionRequestInFlight) {
-                    isPermissionRequestInFlight = true;
-                    shouldRequestPermissions = true;
-                }
-            }
-            if (shouldRequestPermissions) {
-                PermissionHelper.requestPermissions(this, 0, permissions);
-            }
-        } else {
+        if (isPluginDestroyed) {
+            callbackContext.error(buildPermissionError(
+                ERROR_UNKNOWN,
+                "Plugin is destroyed",
+                null,
+                null,
+                "PLUGIN_DESTROYED",
+                -1
+            ));
+            return;
+        }
+
+        if (hasAllInitializePermissions()) {
             callbackContext.success();
+            return;
+        }
+
+        pendingInitializeCallbacks.add(callbackContext);
+        boolean shouldStartPermissionFlow = false;
+        synchronized (permissionRequestMutex) {
+            if (!isPermissionRequestInFlight) {
+                isPermissionRequestInFlight = true;
+                shouldStartPermissionFlow = true;
+            }
+        }
+
+        if (shouldStartPermissionFlow) {
+            requestNextInitializePermissionStage();
         }
     }
 
@@ -216,35 +244,284 @@ public class GeofencePlugin extends CordovaPlugin {
         return true;
     }
 
-    public void onRequestPermissionResult(int requestCode, String[] permissions,
-                                          int[] grantResults) throws JSONException {
+    private boolean hasForegroundLocationPermissions() {
+        return hasPermissions(new String[] {
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        });
+    }
+
+    private boolean requiresBackgroundLocationPermission() {
+        return android.os.Build.VERSION.SDK_INT > 28;
+    }
+
+    private boolean hasBackgroundLocationPermissionIfRequired() {
+        return !requiresBackgroundLocationPermission()
+            || PermissionHelper.hasPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION);
+    }
+
+    private boolean requiresNotificationPermission() {
+        return android.os.Build.VERSION.SDK_INT >= 33;
+    }
+
+    private boolean hasNotificationPermissionIfRequired() {
+        return !requiresNotificationPermission()
+            || PermissionHelper.hasPermission(this, Manifest.permission.POST_NOTIFICATIONS);
+    }
+
+    private boolean hasAllInitializePermissions() {
+        return hasForegroundLocationPermissions()
+            && hasBackgroundLocationPermissionIfRequired()
+            && hasNotificationPermissionIfRequired();
+    }
+
+    private void requestNextInitializePermissionStage() {
+        if (isPluginDestroyed) {
+            failPendingInitializeCallbacks(buildPermissionError(
+                ERROR_UNKNOWN,
+                "Plugin destroyed before initialization completed",
+                null,
+                null,
+                "PLUGIN_DESTROYED",
+                -1
+            ));
+            return;
+        }
+
+        if (!hasForegroundLocationPermissions()) {
+            PermissionHelper.requestPermissions(
+                this,
+                REQUEST_FOREGROUND_LOCATION,
+                new String[] {
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                }
+            );
+            return;
+        }
+
+        if (requiresBackgroundLocationPermission()
+            && !PermissionHelper.hasPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
+            PermissionHelper.requestPermissions(
+                this,
+                REQUEST_BACKGROUND_LOCATION,
+                new String[] { Manifest.permission.ACCESS_BACKGROUND_LOCATION }
+            );
+            return;
+        }
+
+        if (requiresNotificationPermission()
+            && !PermissionHelper.hasPermission(this, Manifest.permission.POST_NOTIFICATIONS)) {
+            PermissionHelper.requestPermissions(
+                this,
+                REQUEST_NOTIFICATION_PERMISSION,
+                new String[] { Manifest.permission.POST_NOTIFICATIONS }
+            );
+            return;
+        }
+
+        succeedPendingInitializeCallbacks();
+    }
+
+    private boolean isPermissionFlowRequestCode(int requestCode) {
+        return requestCode == REQUEST_FOREGROUND_LOCATION
+            || requestCode == REQUEST_BACKGROUND_LOCATION
+            || requestCode == REQUEST_NOTIFICATION_PERMISSION;
+    }
+
+    private String stageForRequestCode(int requestCode) {
+        if (requestCode == REQUEST_FOREGROUND_LOCATION) {
+            return STAGE_FOREGROUND_LOCATION;
+        }
+        if (requestCode == REQUEST_BACKGROUND_LOCATION) {
+            return STAGE_BACKGROUND_LOCATION;
+        }
+        if (requestCode == REQUEST_NOTIFICATION_PERMISSION) {
+            return STAGE_NOTIFICATIONS;
+        }
+        return null;
+    }
+
+    private String[] expectedPermissionsForStage(String stage) {
+        if (STAGE_FOREGROUND_LOCATION.equals(stage)) {
+            return new String[] {
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            };
+        }
+        if (STAGE_BACKGROUND_LOCATION.equals(stage)) {
+            return new String[] { Manifest.permission.ACCESS_BACKGROUND_LOCATION };
+        }
+        if (STAGE_NOTIFICATIONS.equals(stage)) {
+            return new String[] { Manifest.permission.POST_NOTIFICATIONS };
+        }
+        return new String[0];
+    }
+
+    private JSONObject validatePermissionResult(
+        int requestCode,
+        String stage,
+        String[] permissions,
+        int[] grantResults
+    ) {
+        if (stage == null) {
+            return buildPermissionError(
+                ERROR_UNKNOWN,
+                "Unknown permission request stage",
+                null,
+                null,
+                "UNKNOWN_REQUEST_CODE",
+                requestCode
+            );
+        }
+
+        if (permissions == null || grantResults == null
+            || permissions.length == 0 || grantResults.length == 0
+            || permissions.length != grantResults.length) {
+            return buildPermissionError(
+                ERROR_UNKNOWN,
+                "Malformed permission grant result",
+                stage,
+                null,
+                "MALFORMED_GRANT_RESULTS",
+                requestCode
+            );
+        }
+
+        List<String> expectedPermissions = new ArrayList<String>();
+        for (String expected : expectedPermissionsForStage(stage)) {
+            expectedPermissions.add(expected);
+        }
+        List<String> deniedPermissions = new ArrayList<String>();
+
+        for (int i = 0; i < permissions.length; i++) {
+            String permission = permissions[i];
+            if (!expectedPermissions.contains(permission)) {
+                return buildPermissionError(
+                    ERROR_UNKNOWN,
+                    "Unexpected permission in grant result",
+                    stage,
+                    null,
+                    "UNEXPECTED_PERMISSION_RESULT",
+                    requestCode
+                );
+            }
+            if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+                deniedPermissions.add(permission);
+            }
+        }
+
+        if (!deniedPermissions.isEmpty()) {
+            return buildPermissionError(
+                ERROR_PERMISSION_DENIED,
+                "Required permissions not granted",
+                stage,
+                deniedPermissions,
+                "PERMISSION_DENIED",
+                requestCode
+            );
+        }
+
+        for (String expectedPermission : expectedPermissions) {
+            if (!PermissionHelper.hasPermission(this, expectedPermission)) {
+                return buildPermissionError(
+                    ERROR_PERMISSION_DENIED,
+                    "Required permissions not granted",
+                    stage,
+                    null,
+                    "PERMISSION_STATE_MISMATCH",
+                    requestCode
+                );
+            }
+        }
+
+        return null;
+    }
+
+    private List<CallbackContext> drainPendingInitializeCallbacks() {
         List<CallbackContext> callbacks = new ArrayList<CallbackContext>(pendingInitializeCallbacks);
         pendingInitializeCallbacks.clear();
         synchronized (permissionRequestMutex) {
             isPermissionRequestInFlight = false;
         }
+        return callbacks;
+    }
 
-        if (callbacks.isEmpty()) {
+    private void succeedPendingInitializeCallbacks() {
+        List<CallbackContext> callbacks = drainPendingInitializeCallbacks();
+        for (CallbackContext callback : callbacks) {
+            callback.success();
+        }
+    }
+
+    private void failPendingInitializeCallbacks(JSONObject errorObject) {
+        List<CallbackContext> callbacks = drainPendingInitializeCallbacks();
+        for (CallbackContext callback : callbacks) {
+            callback.error(errorObject);
+        }
+    }
+
+    private JSONObject buildPermissionError(
+        String code,
+        String message,
+        String stage,
+        List<String> deniedPermissions,
+        String reason,
+        int requestCode
+    ) {
+        JSONObject errorObject = new JSONObject();
+        try {
+            errorObject.put("code", code);
+            errorObject.put("message", message);
+            if (stage != null) {
+                errorObject.put("stage", stage);
+            }
+            if (reason != null) {
+                errorObject.put("reason", reason);
+            }
+            if (requestCode >= 0) {
+                errorObject.put("requestCode", requestCode);
+            }
+            if (deniedPermissions != null && !deniedPermissions.isEmpty()) {
+                JSONArray denied = new JSONArray();
+                for (String permission : deniedPermissions) {
+                    denied.put(permission);
+                }
+                errorObject.put("deniedPermissions", denied);
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "Failed to build permission error object", e);
+        }
+        return errorObject;
+    }
+
+    public void onRequestPermissionResult(int requestCode, String[] permissions,
+                                          int[] grantResults) throws JSONException {
+        if (!isPermissionFlowRequestCode(requestCode)) {
+            Log.d(TAG, "Ignoring unrelated permission request code " + requestCode);
             return;
         }
 
-        for (int r : grantResults) {
-            if (r == PackageManager.PERMISSION_DENIED) {
-                Log.d(TAG, "Permission Denied!");
-                JSONObject errorObject = new JSONObject();
-                errorObject.put("code", ERROR_PERMISSION_DENIED);
-                errorObject.put("message", "Required location permissions not granted");
-                for (CallbackContext callback : callbacks) {
-                    callback.error(errorObject);
-                }
+        synchronized (permissionRequestMutex) {
+            if (!isPermissionRequestInFlight) {
+                Log.d(TAG, "Ignoring permission result for completed flow");
                 return;
             }
         }
 
-        Log.d(TAG, "Permission Granted!");
-        for (CallbackContext callback : callbacks) {
-            callback.success();
+        JSONObject validationError = validatePermissionResult(
+            requestCode,
+            stageForRequestCode(requestCode),
+            permissions,
+            grantResults
+        );
+        if (validationError != null) {
+            Log.d(TAG, "Permission stage failed");
+            failPendingInitializeCallbacks(validationError);
+            return;
         }
+
+        requestNextInitializePermissionStage();
     }
 
     private static synchronized void sendJavascript(final String js) {
