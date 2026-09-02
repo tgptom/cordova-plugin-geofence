@@ -14,6 +14,12 @@ function addOrUpdateIOS (geofences, success, error) {
             if (typeof success === "function") {
                 success(results);
             }
+
+            function hasAnyNotificationPayload(geofences) {
+                return geofences.some(function (geofence) {
+                    return !!(geofence && geofence.notification);
+                });
+            }
             return results;
         })
         .catch(function (reason) {
@@ -59,7 +65,22 @@ module.exports = {
             return addOrUpdateIOS(geofences, success, error);
         }
 
+        if (hasAnyNotificationPayload(geofences)) {
+            return module.exports
+                .requestNotificationPermission()
+                .catch(function () { return null; })
+                .then(function () {
+                    return execPromise(success, error, "GeofencePlugin", "addOrUpdate", geofences);
+                });
+        }
+
         return execPromise(success, error, "GeofencePlugin", "addOrUpdate", geofences);
+    },
+    requestBackgroundLocationPermission: function (success, error) {
+        return execPromise(success, error, "GeofencePlugin", "requestBackgroundLocationPermission", []);
+    },
+    requestNotificationPermission: function (success, error) {
+        return execPromise(success, error, "GeofencePlugin", "requestNotificationPermission", []);
     },
     /**
      * Replace all monitored geofences atomically.

@@ -21,6 +21,7 @@ import org.json.JSONTokener;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -60,7 +61,11 @@ public class GeofencePlugin extends CordovaPlugin {
 
     private final Object permissionRequestMutex = new Object();
     private final List<CallbackContext> pendingInitializeCallbacks = new CopyOnWriteArrayList<>();
+    private final List<CallbackContext> pendingBackgroundPermissionCallbacks = new CopyOnWriteArrayList<>();
+    private final List<CallbackContext> pendingNotificationPermissionCallbacks = new CopyOnWriteArrayList<>();
     private boolean isPermissionRequestInFlight = false;
+    private boolean isBackgroundPermissionRequestInFlight = false;
+    private boolean isNotificationPermissionRequestInFlight = false;
     private volatile boolean isPluginDestroyed = false;
 
     /**
@@ -122,6 +127,10 @@ public class GeofencePlugin extends CordovaPlugin {
                     callbackContext.success();
                 } else if (action.equals("initialize")) {
                     initialize(callbackContext);
+                } else if (action.equals("requestBackgroundLocationPermission")) {
+                    requestBackgroundLocationPermission(callbackContext);
+                } else if (action.equals("requestNotificationPermission")) {
+                    requestNotificationPermission(callbackContext);
                 } else if (action.equals("deviceReady")) {
                     Intent intent = cordova.getActivity().getIntent();
                     String data = intent.getStringExtra("geofence.notification.data");
@@ -141,14 +150,17 @@ public class GeofencePlugin extends CordovaPlugin {
     @Override
     public void onDestroy() {
         isPluginDestroyed = true;
-        failPendingInitializeCallbacks(buildPermissionError(
+        JSONObject errorObject = buildPermissionError(
             ERROR_UNKNOWN,
             "Plugin destroyed before initialization completed",
             null,
             null,
             "PLUGIN_DESTROYED",
             -1
-        ));
+        );
+        failPendingInitializeCallbacks(errorObject);
+        failPendingBackgroundPermissionCallbacks(errorObject);
+        failPendingNotificationPermissionCallbacks(errorObject);
         super.onDestroy();
     }
 
@@ -231,6 +243,100 @@ public class GeofencePlugin extends CordovaPlugin {
         }
     }
 
+    private void requestBackgroundLocationPermission(CallbackContext callbackContext) {
+        if (callbackContext == null) {
+            return;
+        }
+        if (isPluginDestroyed) {
+            callbackContext.error(buildPermissionError(
+                ERROR_UNKNOWN,
+                "Plugin is destroyed",
+                STAGE_BACKGROUND_LOCATION,
+                null,
+                "PLUGIN_DESTROYED",
+                REQUEST_BACKGROUND_LOCATION
+            ));
+            return;
+        }
+        if (!requiresBackgroundLocationPermission()) {
+            callbackContext.success();
+            return;
+        }
+        if (!hasForegroundLocationPermissions()) {
+            callbackContext.error(buildPermissionError(
+                ERROR_PERMISSION_DENIED,
+                "Foreground location permission is required before requesting background location",
+                STAGE_BACKGROUND_LOCATION,
+                permissionList(
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ),
+                "FOREGROUND_REQUIRED",
+                REQUEST_BACKGROUND_LOCATION
+            ));
+            return;
+        }
+        if (PermissionHelper.hasPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
+            callbackContext.success();
+            return;
+        }
+        pendingBackgroundPermissionCallbacks.add(callbackContext);
+        boolean shouldStart = false;
+        synchronized (permissionRequestMutex) {
+            if (!isBackgroundPermissionRequestInFlight) {
+                isBackgroundPermissionRequestInFlight = true;
+                shouldStart = true;
+            }
+        }
+        if (shouldStart) {
+            PermissionHelper.requestPermissions(
+                this,
+                REQUEST_BACKGROUND_LOCATION,
+                new String[] { Manifest.permission.ACCESS_BACKGROUND_LOCATION }
+            );
+        }
+    }
+
+    private void requestNotificationPermission(CallbackContext callbackContext) {
+        if (callbackContext == null) {
+            return;
+        }
+        if (isPluginDestroyed) {
+            callbackContext.error(buildPermissionError(
+                ERROR_UNKNOWN,
+                "Plugin is destroyed",
+                STAGE_NOTIFICATIONS,
+                null,
+                "PLUGIN_DESTROYED",
+                REQUEST_NOTIFICATION_PERMISSION
+            ));
+            return;
+        }
+        if (!requiresNotificationPermission()) {
+            callbackContext.success();
+            return;
+        }
+        if (PermissionHelper.hasPermission(this, Manifest.permission.POST_NOTIFICATIONS)) {
+            callbackContext.success();
+            return;
+        }
+        pendingNotificationPermissionCallbacks.add(callbackContext);
+        boolean shouldStart = false;
+        synchronized (permissionRequestMutex) {
+            if (!isNotificationPermissionRequestInFlight) {
+                isNotificationPermissionRequestInFlight = true;
+                shouldStart = true;
+            }
+        }
+        if (shouldStart) {
+            PermissionHelper.requestPermissions(
+                this,
+                REQUEST_NOTIFICATION_PERMISSION,
+                new String[] { Manifest.permission.POST_NOTIFICATIONS }
+            );
+        }
+    }
+
     public static boolean isSnoozed(String id) {
         Long fenceTime = snoozedFences.get(id);
         return fenceTime != null && fenceTime > System.currentTimeMillis();
@@ -255,24 +361,16 @@ public class GeofencePlugin extends CordovaPlugin {
         return android.os.Build.VERSION.SDK_INT > 28;
     }
 
-    private boolean hasBackgroundLocationPermissionIfRequired() {
-        return !requiresBackgroundLocationPermission()
-            || PermissionHelper.hasPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION);
-    }
-
     private boolean requiresNotificationPermission() {
         return android.os.Build.VERSION.SDK_INT >= 33;
     }
 
-    private boolean hasNotificationPermissionIfRequired() {
-        return !requiresNotificationPermission()
-            || PermissionHelper.hasPermission(this, Manifest.permission.POST_NOTIFICATIONS);
+    private boolean hasAllInitializePermissions() {
+        return hasForegroundLocationPermissions();
     }
 
-    private boolean hasAllInitializePermissions() {
-        return hasForegroundLocationPermissions()
-            && hasBackgroundLocationPermissionIfRequired()
-            && hasNotificationPermissionIfRequired();
+    private List<String> permissionList(String... values) {
+        return new ArrayList<String>(Arrays.asList(values));
     }
 
     private void requestNextInitializePermissionStage() {
@@ -300,46 +398,7 @@ public class GeofencePlugin extends CordovaPlugin {
             return;
         }
 
-        if (requiresBackgroundLocationPermission()
-            && !PermissionHelper.hasPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
-            PermissionHelper.requestPermissions(
-                this,
-                REQUEST_BACKGROUND_LOCATION,
-                new String[] { Manifest.permission.ACCESS_BACKGROUND_LOCATION }
-            );
-            return;
-        }
-
-        if (requiresNotificationPermission()
-            && !PermissionHelper.hasPermission(this, Manifest.permission.POST_NOTIFICATIONS)) {
-            PermissionHelper.requestPermissions(
-                this,
-                REQUEST_NOTIFICATION_PERMISSION,
-                new String[] { Manifest.permission.POST_NOTIFICATIONS }
-            );
-            return;
-        }
-
         succeedPendingInitializeCallbacks();
-    }
-
-    private boolean isPermissionFlowRequestCode(int requestCode) {
-        return requestCode == REQUEST_FOREGROUND_LOCATION
-            || requestCode == REQUEST_BACKGROUND_LOCATION
-            || requestCode == REQUEST_NOTIFICATION_PERMISSION;
-    }
-
-    private String stageForRequestCode(int requestCode) {
-        if (requestCode == REQUEST_FOREGROUND_LOCATION) {
-            return STAGE_FOREGROUND_LOCATION;
-        }
-        if (requestCode == REQUEST_BACKGROUND_LOCATION) {
-            return STAGE_BACKGROUND_LOCATION;
-        }
-        if (requestCode == REQUEST_NOTIFICATION_PERMISSION) {
-            return STAGE_NOTIFICATIONS;
-        }
-        return null;
     }
 
     private String[] expectedPermissionsForStage(String stage) {
@@ -444,6 +503,24 @@ public class GeofencePlugin extends CordovaPlugin {
         synchronized (permissionRequestMutex) {
             isPermissionRequestInFlight = false;
         }
+
+        private List<CallbackContext> drainPendingBackgroundPermissionCallbacks() {
+            List<CallbackContext> callbacks = new ArrayList<CallbackContext>(pendingBackgroundPermissionCallbacks);
+            pendingBackgroundPermissionCallbacks.clear();
+            synchronized (permissionRequestMutex) {
+                isBackgroundPermissionRequestInFlight = false;
+            }
+            return callbacks;
+        }
+
+        private List<CallbackContext> drainPendingNotificationPermissionCallbacks() {
+            List<CallbackContext> callbacks = new ArrayList<CallbackContext>(pendingNotificationPermissionCallbacks);
+            pendingNotificationPermissionCallbacks.clear();
+            synchronized (permissionRequestMutex) {
+                isNotificationPermissionRequestInFlight = false;
+            }
+            return callbacks;
+        }
         return callbacks;
     }
 
@@ -456,6 +533,34 @@ public class GeofencePlugin extends CordovaPlugin {
 
     private void failPendingInitializeCallbacks(JSONObject errorObject) {
         List<CallbackContext> callbacks = drainPendingInitializeCallbacks();
+        for (CallbackContext callback : callbacks) {
+            callback.error(errorObject);
+        }
+    }
+
+    private void succeedPendingBackgroundPermissionCallbacks() {
+        List<CallbackContext> callbacks = drainPendingBackgroundPermissionCallbacks();
+        for (CallbackContext callback : callbacks) {
+            callback.success();
+        }
+    }
+
+    private void failPendingBackgroundPermissionCallbacks(JSONObject errorObject) {
+        List<CallbackContext> callbacks = drainPendingBackgroundPermissionCallbacks();
+        for (CallbackContext callback : callbacks) {
+            callback.error(errorObject);
+        }
+    }
+
+    private void succeedPendingNotificationPermissionCallbacks() {
+        List<CallbackContext> callbacks = drainPendingNotificationPermissionCallbacks();
+        for (CallbackContext callback : callbacks) {
+            callback.success();
+        }
+    }
+
+    private void failPendingNotificationPermissionCallbacks(JSONObject errorObject) {
+        List<CallbackContext> callbacks = drainPendingNotificationPermissionCallbacks();
         for (CallbackContext callback : callbacks) {
             callback.error(errorObject);
         }
@@ -497,31 +602,74 @@ public class GeofencePlugin extends CordovaPlugin {
 
     public void onRequestPermissionResult(int requestCode, String[] permissions,
                                           int[] grantResults) throws JSONException {
-        if (!isPermissionFlowRequestCode(requestCode)) {
-            Log.d(TAG, "Ignoring unrelated permission request code " + requestCode);
-            return;
-        }
+        if (requestCode == REQUEST_FOREGROUND_LOCATION) {
+            synchronized (permissionRequestMutex) {
+                if (!isPermissionRequestInFlight) {
+                    Log.d(TAG, "Ignoring permission result for completed initialize flow");
+                    return;
+                }
+            }
 
-        synchronized (permissionRequestMutex) {
-            if (!isPermissionRequestInFlight) {
-                Log.d(TAG, "Ignoring permission result for completed flow");
+            JSONObject validationError = validatePermissionResult(
+                requestCode,
+                STAGE_FOREGROUND_LOCATION,
+                permissions,
+                grantResults
+            );
+            if (validationError != null) {
+                Log.d(TAG, "Foreground permission stage failed");
+                failPendingInitializeCallbacks(validationError);
                 return;
             }
-        }
-
-        JSONObject validationError = validatePermissionResult(
-            requestCode,
-            stageForRequestCode(requestCode),
-            permissions,
-            grantResults
-        );
-        if (validationError != null) {
-            Log.d(TAG, "Permission stage failed");
-            failPendingInitializeCallbacks(validationError);
+            requestNextInitializePermissionStage();
             return;
         }
 
-        requestNextInitializePermissionStage();
+        if (requestCode == REQUEST_BACKGROUND_LOCATION) {
+            synchronized (permissionRequestMutex) {
+                if (!isBackgroundPermissionRequestInFlight) {
+                    Log.d(TAG, "Ignoring permission result for completed background flow");
+                    return;
+                }
+            }
+            JSONObject validationError = validatePermissionResult(
+                requestCode,
+                STAGE_BACKGROUND_LOCATION,
+                permissions,
+                grantResults
+            );
+            if (validationError != null) {
+                Log.d(TAG, "Background permission stage failed");
+                failPendingBackgroundPermissionCallbacks(validationError);
+                return;
+            }
+            succeedPendingBackgroundPermissionCallbacks();
+            return;
+        }
+
+        if (requestCode == REQUEST_NOTIFICATION_PERMISSION) {
+            synchronized (permissionRequestMutex) {
+                if (!isNotificationPermissionRequestInFlight) {
+                    Log.d(TAG, "Ignoring permission result for completed notification flow");
+                    return;
+                }
+            }
+            JSONObject validationError = validatePermissionResult(
+                requestCode,
+                STAGE_NOTIFICATIONS,
+                permissions,
+                grantResults
+            );
+            if (validationError != null) {
+                Log.d(TAG, "Notification permission stage failed");
+                failPendingNotificationPermissionCallbacks(validationError);
+                return;
+            }
+            succeedPendingNotificationPermissionCallbacks();
+            return;
+        }
+
+        Log.d(TAG, "Ignoring unrelated permission request code " + requestCode);
     }
 
     private static synchronized void sendJavascript(final String js) {

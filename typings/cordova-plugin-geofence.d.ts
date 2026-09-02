@@ -22,6 +22,16 @@ interface GeofencePlugin {
     errorCallback?: (error: string) => void
   ): Promise<any>;
 
+  requestBackgroundLocationPermission(
+    successCallback?: (result: any) => void,
+    errorCallback?: (error: string | { code: string; message: string }) => void
+  ): Promise<any>;
+
+  requestNotificationPermission(
+    successCallback?: (result: any) => void,
+    errorCallback?: (error: string | { code: string; message: string }) => void
+  ): Promise<any>;
+
   replace(
     geofence: Geofence | Geofence[],
     successCallback?: (result: any) => void,

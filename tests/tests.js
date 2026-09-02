@@ -70,6 +70,16 @@ exports.defineAutoTests = function () {
                 expect(typeof window.geofence.initialize).toBe("function");
             });
 
+            it("should contain requestBackgroundLocationPermission function", function () {
+                expect(window.geofence.requestBackgroundLocationPermission).toBeDefined();
+                expect(typeof window.geofence.requestBackgroundLocationPermission).toBe("function");
+            });
+
+            it("should contain requestNotificationPermission function", function () {
+                expect(window.geofence.requestNotificationPermission).toBeDefined();
+                expect(typeof window.geofence.requestNotificationPermission).toBe("function");
+            });
+
             it("should contain remove function", function () {
                 expect(window.geofence.remove).toBeDefined();
                 expect(typeof window.geofence.remove).toBe("function");

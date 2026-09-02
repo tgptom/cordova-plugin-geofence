@@ -11,6 +11,7 @@ import UIKit
 import WebKit
 import UserNotifications
 import CoreLocation
+import Security
 
 let TAG = "GeofencePlugin"
 let AppGeofenceTrackingTransition = "AppGeofenceTrackingTransition"
@@ -347,6 +348,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     var snoozedFences = [String : Double]()
     var isActive = false
     var pendingExitWorkItem: DispatchWorkItem?
+    weak var forwardedNotificationDelegate: UNUserNotificationCenterDelegate?
     let pendingExitAtKey = "com.cowbell.cordova.geofence.pendingExitAt"
     let lastActiveInsideKey = "com.cowbell.cordova.geofence.lastActiveInside"
     let exitDebounceSeconds: TimeInterval = 30
@@ -367,7 +369,9 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
         performOnLocationManagerThread {
             self.locationManager.delegate = self
         }
-        UNUserNotificationCenter.current().delegate = self
+        let notificationCenter = UNUserNotificationCenter.current()
+        forwardedNotificationDelegate = notificationCenter.delegate
+        notificationCenter.delegate = self
     }
     
     func registerPermissions() {
@@ -620,6 +624,43 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             reconcileTrackingState(triggerTransitionType: GeofenceTransitionExit)
         }
     }
+
+    func allowInsecureCallbackUrls() -> Bool {
+        let value = (Bundle.main.object(forInfoDictionaryKey: "GeofenceAllowInsecureCallbackUrls") as? String) ?? "false"
+        return value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "true"
+    }
+
+    func callbackUrlAllowlist() -> Set<String> {
+        let value = (Bundle.main.object(forInfoDictionaryKey: "GeofenceCallbackUrlAllowlist") as? String) ?? ""
+        return Set(
+            value
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+        )
+    }
+
+    func isAllowedCallbackUrl(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased(),
+              !host.isEmpty else {
+            return false
+        }
+
+        if allowInsecureCallbackUrls() {
+            if scheme != "https" && scheme != "http" {
+                return false
+            }
+        } else if scheme != "https" {
+            return false
+        }
+
+        let allowlist = callbackUrlAllowlist()
+        if allowlist.isEmpty {
+            return true
+        }
+        return allowlist.contains(where: { host == $0 || host.hasSuffix(".\($0)") })
+    }
     
     func handleTransition(_ id: String, transitionType: Int) {
         if var geoNotification = store.findById(id) {
@@ -640,46 +681,50 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
                 if geoNotification["url"].isExists() {
                     log("Should post to " + geoNotification["url"].stringValue)
                     if let url = URL(string: geoNotification["url"].stringValue) {
-                        let dateFormatter = DateFormatter()
-                        dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-                        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-                        //formatter.locale = Locale(identifier: "en_US")
+                        if isAllowedCallbackUrl(url) {
+                            let dateFormatter = DateFormatter()
+                            dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+                            dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+                            //formatter.locale = Locale(identifier: "en_US")
 
-                        let transitionName: String
-                        if transitionType == GeofenceTransitionEnter {
-                            transitionName = "ENTER"
-                        } else if transitionType == GeofenceTransitionExit {
-                            transitionName = "EXIT"
-                        } else if transitionType == GeofenceTransitionDwell {
-                            transitionName = "DWELL"
-                        } else {
-                            transitionName = "UNKNOWN"
-                        }
-
-                        let jsonDict = ["geofenceId": geoNotification["id"].stringValue, "transition": transitionName, "date": dateFormatter.string(from: Date())]
-                        let jsonData = try! JSONSerialization.data(withJSONObject: jsonDict, options: [])
-                        
-                        var request = URLRequest(url: url)
-                        request.httpMethod = "post"
-                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                        request.setValue(geoNotification["authorization"].stringValue, forHTTPHeaderField: "Authorization")
-                        request.httpBody = jsonData
-                        
-                        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
-                            if let error = error {
-                                print("error:", error)
-                                return
+                            let transitionName: String
+                            if transitionType == GeofenceTransitionEnter {
+                                transitionName = "ENTER"
+                            } else if transitionType == GeofenceTransitionExit {
+                                transitionName = "EXIT"
+                            } else if transitionType == GeofenceTransitionDwell {
+                                transitionName = "DWELL"
+                            } else {
+                                transitionName = "UNKNOWN"
                             }
+
+                            let jsonDict = ["geofenceId": geoNotification["id"].stringValue, "transition": transitionName, "date": dateFormatter.string(from: Date())]
+                            let jsonData = try! JSONSerialization.data(withJSONObject: jsonDict, options: [])
                             
-                            do {
-                                guard let data = data else { return }
-                                guard let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: AnyObject] else { return }
-                                print("json:", json)
-                            } catch {
-                                print("error:", error)
+                            var request = URLRequest(url: url)
+                            request.httpMethod = "post"
+                            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                            request.setValue(geoNotification["authorization"].stringValue, forHTTPHeaderField: "Authorization")
+                            request.httpBody = jsonData
+                            
+                            let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
+                                if let error = error {
+                                    print("error:", error)
+                                    return
+                                }
+                                
+                                do {
+                                    guard let data = data else { return }
+                                    guard let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: AnyObject] else { return }
+                                    print("json:", json)
+                                } catch {
+                                    print("error:", error)
+                                }
                             }
+                            task.resume()
+                        } else {
+                            log("Blocked callback url for geofence \(id)")
                         }
-                        task.resume()
                     } else {
                         log("Invalid callback url for geofence \(id)")
                     }
@@ -1067,22 +1112,34 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        if notification.request.content.userInfo["geofence.notification.data"] != nil {
-            // Play sound and show alert to the user if it is a geofence notification
+        let isGeofenceNotification = notification.request.content.userInfo["geofence.notification.data"] != nil
+            || notification.request.content.userInfo["foreground"] != nil
+
+        let localOptions: UNNotificationPresentationOptions
+        if isGeofenceNotification {
             if #available(iOS 14.0, *) {
-                completionHandler([.banner, .sound])
+                localOptions = [.banner, .sound]
             } else {
-                completionHandler([.alert, .sound])
-            }
-        } else if (notification.request.content.userInfo["foreground"] != nil) {
-            // Play sound and show alert to the user if the notification has foreground property
-            if #available(iOS 14.0, *) {
-                completionHandler([.banner, .sound])
-            } else {
-                completionHandler([.alert, .sound])
+                localOptions = [.alert, .sound]
             }
         } else {
-            completionHandler([])
+            localOptions = []
+        }
+
+        guard let forwarded = forwardedNotificationDelegate,
+              (forwarded as AnyObject) !== self else {
+            completionHandler(localOptions)
+            return
+        }
+
+        let selector = #selector(UNUserNotificationCenterDelegate.userNotificationCenter(_:willPresent:withCompletionHandler:))
+        guard (forwarded as AnyObject).responds(to: selector) else {
+            completionHandler(localOptions)
+            return
+        }
+
+        forwarded.userNotificationCenter?(center, willPresent: notification) { forwardedOptions in
+            completionHandler(localOptions.union(forwardedOptions))
         }
     }
     
@@ -1112,11 +1169,26 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
         default:
             log("Unknown action")
         }
-        completionHandler()
+
+        guard let forwarded = forwardedNotificationDelegate,
+              (forwarded as AnyObject) !== self else {
+            completionHandler()
+            return
+        }
+        let selector = #selector(UNUserNotificationCenterDelegate.userNotificationCenter(_:didReceive:withCompletionHandler:))
+        guard (forwarded as AnyObject).responds(to: selector) else {
+            completionHandler()
+            return
+        }
+        forwarded.userNotificationCenter?(center, didReceive: response) {
+            completionHandler()
+        }
     }
 }
 
 class GeoNotificationStore {
+    let authorizationStore = IOSSecureAuthorizationStore()
+
     init() {
         createDBStructure()
     }
@@ -1138,6 +1210,57 @@ class GeoNotificationStore {
                 log("GeoNotifications table was created successfully")
             }
         }
+
+        class IOSSecureAuthorizationStore {
+            private let service = "com.cowbell.cordova.geofence.authorization"
+
+            func setAuthorization(_ value: String?, for geofenceId: String) {
+                guard !geofenceId.isEmpty else { return }
+                if let token = value, !token.isEmpty {
+                    _ = removeAuthorization(for: geofenceId)
+                    let query: [String: Any] = [
+                        kSecClass as String: kSecClassGenericPassword,
+                        kSecAttrService as String: service,
+                        kSecAttrAccount as String: geofenceId,
+                        kSecValueData as String: Data(token.utf8),
+                        kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                    ]
+                    SecItemAdd(query as CFDictionary, nil)
+                } else {
+                    _ = removeAuthorization(for: geofenceId)
+                }
+            }
+
+            func getAuthorization(for geofenceId: String) -> String? {
+                guard !geofenceId.isEmpty else { return nil }
+                let query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: service,
+                    kSecAttrAccount as String: geofenceId,
+                    kSecReturnData as String: true,
+                    kSecMatchLimit as String: kSecMatchLimitOne
+                ]
+                var item: CFTypeRef?
+                let status = SecItemCopyMatching(query as CFDictionary, &item)
+                guard status == errSecSuccess,
+                      let data = item as? Data,
+                      let value = String(data: data, encoding: .utf8) else {
+                    return nil
+                }
+                return value
+            }
+
+            @discardableResult
+            func removeAuthorization(for geofenceId: String) -> OSStatus {
+                guard !geofenceId.isEmpty else { return errSecParam }
+                let query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: service,
+                    kSecAttrAccount as String: geofenceId
+                ]
+                return SecItemDelete(query as CFDictionary)
+            }
+        }
     }
     
     func addOrUpdate(_ geoNotification: JSON) {
@@ -1153,6 +1276,8 @@ class GeoNotificationStore {
     func add(_ geoNotification: JSON) {
         let id = geoNotification["id"].stringValue
         var notificationCopy = geoNotification
+        authorizationStore.setAuthorization(notificationCopy["authorization"].string, for: id)
+        notificationCopy["authorization"] = JSON.null
         notificationCopy["lastTriggered"] = 0
         let err = SD.executeChange("INSERT INTO GeoNotifications (Id, Data) VALUES(?, ?)",
                                    withArgs: [id as AnyObject, notificationCopy.description as AnyObject])
@@ -1164,8 +1289,11 @@ class GeoNotificationStore {
     
     func update(_ geoNotification: JSON) {
         let id = geoNotification["id"].stringValue
+        var notificationCopy = geoNotification
+        authorizationStore.setAuthorization(notificationCopy["authorization"].string, for: id)
+        notificationCopy["authorization"] = JSON.null
         let err = SD.executeChange("UPDATE GeoNotifications SET Data = ? WHERE Id = ?",
-                                   withArgs: [geoNotification.description as AnyObject, id as AnyObject])
+                                   withArgs: [notificationCopy.description as AnyObject, id as AnyObject])
         
         if err != nil {
             log("Error while adding \(id) GeoNotification: \(String(describing: err))")
@@ -1193,7 +1321,11 @@ class GeoNotificationStore {
         } else {
             if (resultSet.count > 0) {
                 let jsonString = resultSet[0]["Data"]!.asString()!
-                return JSON(data: jsonString.data(using: String.Encoding.utf8)!)
+                var json = JSON(data: jsonString.data(using: String.Encoding.utf8)!)
+                if let authorization = authorizationStore.getAuthorization(for: id) {
+                    json["authorization"].string = authorization
+                }
+                return json
             }
             else {
                 return nil
@@ -1212,7 +1344,12 @@ class GeoNotificationStore {
             var results = [JSON]()
             for row in resultSet {
                 if let data = row["Data"]?.asString() {
-                    results.append(JSON(data: data.data(using: String.Encoding.utf8)!))
+                    var json = JSON(data: data.data(using: String.Encoding.utf8)!)
+                    let id = json["id"].stringValue
+                    if let authorization = authorizationStore.getAuthorization(for: id) {
+                        json["authorization"].string = authorization
+                    }
+                    results.append(json)
                 }
             }
             return results
@@ -1221,6 +1358,7 @@ class GeoNotificationStore {
     
     func remove(_ id: String) {
         let err = SD.executeChange("DELETE FROM GeoNotifications WHERE Id = ?", withArgs: [id as AnyObject])
+        authorizationStore.removeAuthorization(for: id)
         
         if err != nil {
             log("Error while removing \(id) GeoNotification: \(String(describing: err))")
@@ -1228,6 +1366,11 @@ class GeoNotificationStore {
     }
     
     func clear() {
+        if let all = getAll() {
+            for json in all {
+                authorizationStore.removeAuthorization(for: json["id"].stringValue)
+            }
+        }
         let err = SD.executeChange("DELETE FROM GeoNotifications")
         
         if err != nil {

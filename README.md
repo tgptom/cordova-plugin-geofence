@@ -36,10 +36,8 @@ cordova plugin rm cordova-plugin-geofence
 ## Supported Platforms
 
 - Android
-- iOS >=7.0
-- Windows Phone 8.1
-    - using Universal App (cordova windows platform)
-    - using Silverlight App (cordova wp8 platform retargeted to WP 8.1)
+- iOS (Cordova iOS >= 8)
+- Windows / WP8 artifacts are legacy and maintained on a best-effort basis
 
 ## Known Limitations
 
@@ -109,16 +107,6 @@ Time-window and delayed-exit reconciliation while iOS is suspended/terminated is
 2. Launch app and wait for plugin eager load (`onload=true`) without calling `geofence.initialize()`: confirm no location permission prompt appears.
 3. Trigger explicit app action that calls `geofence.initialize()`: confirm the app may now request location permission.
 
-:warning: Swift 3 is not supported at the moment, the following preference has to be added in your project :
-
-For Cordova projects
-
-`<preference name="UseLegacySwiftLanguageVersion" value="true" />`
-
-For PhoneGap projects
-
-`<preference name="swift-version" value="2.3" />`
-
 ### iOS Quirks
 
 Since iOS 10 it's mandatory to add a `NSLocationAlwaysUsageDescription` and `NSLocationWhenInUseUsageDescription` entries in the info.plist.
@@ -162,6 +150,8 @@ Cordova initialize plugin to `window.geofence` object.
 All methods returning promises, but you can also use standard callback functions.
 
 - `window.geofence.initialize(onSuccess, onError)`
+- `window.geofence.requestBackgroundLocationPermission(onSuccess, onError)` (Android optional follow-up stage on Android 10+)
+- `window.geofence.requestNotificationPermission(onSuccess, onError)` (Android 13+ optional)
 - `window.geofence.addOrUpdate(geofences, onSuccess, onError)`
 - `window.geofence.replace(geofences, onSuccess, onError)` (iOS only; Android rejects with `UNSUPPORTED_OPERATION`)
 - `window.geofence.remove(geofenceId, onSuccess, onError)`
@@ -214,7 +204,20 @@ document.addEventListener('deviceready', function () {
 ```
 
 Initialization process is responsible for requesting necessary permissions (including Always Location when required by your app flow).
-If required permissions are not granted then initialization fails with error message.
+On Android, initialization requests foreground location permission only. Background location should be requested later through `requestBackgroundLocationPermission()` when your UX is ready to explain "Allow all the time". Android 13+ notifications are optional and can be requested via `requestNotificationPermission()`.
+
+## Secure transition callback URL policy
+
+Transition webhooks now enforce secure transport by default:
+
+- HTTPS is required unless explicitly disabled.
+- Optional host allowlist can restrict callbacks to trusted domains.
+- Authorization headers are stored in encrypted/keychain-backed storage, not in plain geofence payload records.
+
+Plugin variables:
+
+- `GEOFENCE_ALLOW_INSECURE_CALLBACK_URLS` (`false` by default)
+- `GEOFENCE_CALLBACK_URL_ALLOWLIST` (comma-separated hosts, empty by default)
 
 ## Adding new geofence to monitor
 

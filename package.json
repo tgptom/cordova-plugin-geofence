@@ -11,10 +11,10 @@
     ]
   },
   "scripts": {
-    "test:ios": "FIX_PARAMEDIC=true cordova-paramedic --platform ios --plugin . --verbose",
-    "pretest": "sed -i 's/play-services-location:+/play-services-location:9.8.0/g' plugin.xml",
-    "test": "cordova-paramedic --platform android@6.0 --plugin . --verbose",
-    "posttest": "sed -i 's/play-services-location:9.8.0/play-services-location:+/g' plugin.xml"
+    "test:unit": "node tests/android-permission-concurrency.test.js && node tests/android-security-port.test.js && node tests/android-coordinator-debounce.test.js && node tests/ios-transition-persistence.test.js && node tests/contract-notification-name.test.js",
+    "test:paramedic:android": "cordova-paramedic --platform android --plugin . --verbose",
+    "test:paramedic:ios": "cordova-paramedic --platform ios --plugin . --verbose",
+    "test": "npm run test:unit"
   },
   "repository": {
     "type": "git",
@@ -37,15 +37,15 @@
     "url": "https://github.com/cowbell/cordova-plugin-geofence/issues"
   },
   "homepage": "https://github.com/cowbell/cordova-plugin-geofence#readme",
-  "engines": [
-    {
-      "name": "cordova",
-      "version": ">=5.0.0"
-    }
-  ],
+  "engines": {
+    "cordova": ">=12.0.0",
+    "cordova-android": ">=12.0.0",
+    "cordova-ios": ">=8.0.0",
+    "node": ">=18.0.0"
+  },
   "typings": "./typings/cordova-plugin-geofence.d.ts",
   "devDependencies": {
-    "cordova": "^6.1.1",
+    "cordova": "^12.0.0",
     "cordova-paramedic": "https://github.com/apache/cordova-paramedic"
   }
 }

@@ -75,14 +75,6 @@ function createFlowHarness(options) {
       state.requests.push(REQUEST_FOREGROUND_LOCATION);
       return;
     }
-    if (cfg.sdk > 28 && !state.background) {
-      state.requests.push(REQUEST_BACKGROUND_LOCATION);
-      return;
-    }
-    if (cfg.sdk >= 33 && !state.notifications) {
-      state.requests.push(REQUEST_NOTIFICATION_PERMISSION);
-      return;
-    }
     settleQueue({ ok: true });
   }
 
@@ -125,6 +117,41 @@ function createFlowHarness(options) {
       }
       requestNextStage();
     },
+    requestBackgroundPermission() {
+      if (cfg.sdk <= 28 || state.background) {
+        callbackSettlements.push({ ok: true, stage: 'background' });
+        return;
+      }
+      if (!state.foreground) {
+        callbackSettlements.push({ ok: false, stage: 'background', reason: 'FOREGROUND_REQUIRED' });
+        return;
+      }
+      state.requests.push(REQUEST_BACKGROUND_LOCATION);
+    },
+    requestNotificationPermission() {
+      if (cfg.sdk < 33 || state.notifications) {
+        callbackSettlements.push({ ok: true, stage: 'notification' });
+        return;
+      }
+      state.requests.push(REQUEST_NOTIFICATION_PERMISSION);
+    },
+    onOptionalPermissionResult(requestCode, grantResults) {
+      if (!Array.isArray(grantResults) || grantResults.length === 0) {
+        callbackSettlements.push({ ok: false, reason: 'MALFORMED_GRANT_RESULTS' });
+        return;
+      }
+      if (grantResults.some((result) => result !== 'granted')) {
+        callbackSettlements.push({ ok: false, reason: 'PERMISSION_DENIED' });
+        return;
+      }
+      if (requestCode === REQUEST_BACKGROUND_LOCATION) {
+        state.background = true;
+        callbackSettlements.push({ ok: true, stage: 'background' });
+      } else if (requestCode === REQUEST_NOTIFICATION_PERMISSION) {
+        state.notifications = true;
+        callbackSettlements.push({ ok: true, stage: 'notification' });
+      }
+    },
     callbackSettlements
   };
 }
@@ -135,22 +162,29 @@ function createFlowHarness(options) {
   assert.deepStrictEqual(
     flow.state.requests,
     [2001],
-    'Initialize must request foreground location before any other permission'
+    'Initialize must request only foreground location'
   );
   flow.onPermissionResult(2001, ['granted', 'granted']);
   assert.deepStrictEqual(
+    flow.callbackSettlements,
+    [{ ok: true }],
+    'Initialize must settle after foreground permission succeeds'
+  );
+
+  flow.requestBackgroundPermission();
+  assert.deepStrictEqual(
     flow.state.requests,
     [2001, 2002],
-    'Background permission must be requested only after foreground permission succeeds'
+    'Background permission must be requested as an explicit follow-up stage'
   );
-  flow.onPermissionResult(2002, ['granted']);
+  flow.onOptionalPermissionResult(2002, ['granted']);
+  flow.requestNotificationPermission();
   assert.deepStrictEqual(
     flow.state.requests,
     [2001, 2002, 2003],
-    'Notification permission must be requested as a separate final stage on Android 13+'
+    'Notification permission must be requested only when needed'
   );
-  flow.onPermissionResult(2003, ['granted']);
-  assert.deepStrictEqual(flow.callbackSettlements, [{ ok: true }]);
+  flow.onOptionalPermissionResult(2003, ['granted']);
 }
 
 {
@@ -163,11 +197,19 @@ function createFlowHarness(options) {
     'Concurrent initialize calls must share one in-flight permission flow'
   );
   flow.onPermissionResult(2001, ['granted', 'granted']);
-  flow.onPermissionResult(2002, ['granted']);
-  flow.onPermissionResult(2003, ['granted']);
   assert.strictEqual(callbackA.settled, true, 'First initialize callback must settle');
   assert.strictEqual(callbackB.settled, true, 'Second initialize callback must settle');
   assert.strictEqual(flow.callbackSettlements.length, 2, 'All queued initialize callbacks must settle exactly once');
+}
+
+{
+  const flow = createFlowHarness({ sdk: 34, hasForeground: false });
+  flow.requestBackgroundPermission();
+  assert.deepStrictEqual(
+    flow.callbackSettlements,
+    [{ ok: false, stage: 'background', reason: 'FOREGROUND_REQUIRED' }],
+    'Background permission must require foreground permission first'
+  );
 }
 
 {

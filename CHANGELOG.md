@@ -2,7 +2,15 @@
 
 ## Version 0.8.1 - Unreleased
 
-- Bump plugin version in package and plugin metadata for release preparation.
+- Security: parameterized Android LocalStorage update/delete queries to prevent SQL injection by geofence ID values.
+- Security: moved persisted authorization headers to secure platform stores (Android encrypted shared preferences, iOS keychain).
+- Security: hardened transition callback URLs with HTTPS-by-default and optional domain allowlist policy.
+- Android: fixed transition callback job collisions by generating unique job IDs per event.
+- Android: switched transition webhook JSON payload construction to structured JSON serialization.
+- Android: initialization now requests foreground location only; background location and Android 13 notification permissions are explicit optional follow-up requests.
+- iOS: added UNUserNotificationCenter delegate forwarding/coexistence with host app or other plugins.
+- Metadata: added Cordova Android engine constraint and callback security plugin preferences.
+- Tooling: modernized npm test scripts to run unit assertion suite directly.
 
 ## Version 0.7.0 - 14.05.2017
 

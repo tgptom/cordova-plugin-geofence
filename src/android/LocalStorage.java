@@ -77,8 +77,9 @@ public class LocalStorage {
             values.put(LocalStorageDBHelper.LOCALSTORAGE_VALUE, value);
             if (oldValue != null) {
                 database.update(LocalStorageDBHelper.LOCALSTORAGE_TABLE_NAME,
-                        values, LocalStorageDBHelper.LOCALSTORAGE_ID + "='"
-                                + key + "'", null);
+                        values,
+                        LocalStorageDBHelper.LOCALSTORAGE_ID + "=?",
+                        new String[] { key });
             } else {
                 database.insert(LocalStorageDBHelper.LOCALSTORAGE_TABLE_NAME,
                         null, values);
@@ -95,8 +96,8 @@ public class LocalStorage {
         if (key != null) {
             database = localStorageDBHelper.getWritableDatabase();
             database.delete(LocalStorageDBHelper.LOCALSTORAGE_TABLE_NAME,
-                    LocalStorageDBHelper.LOCALSTORAGE_ID + "='" + key + "'",
-                    null);
+                    LocalStorageDBHelper.LOCALSTORAGE_ID + "=?",
+                    new String[] { key });
         }
     }
 

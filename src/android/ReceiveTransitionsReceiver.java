@@ -124,6 +124,10 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
 
             for (GeoNotification geoNotification : geoNotifications) {
                 if (geoNotification.url != null) {
+                    if (!TransitionJobService.isAllowedCallbackUrl(context, geoNotification.url)) {
+                        logger.log(Log.WARN, "Skipping disallowed callback URL for geofence " + geoNotification.id);
+                        continue;
+                    }
                     String transition = null;
                     if (transitionType == Geofence.GEOFENCE_TRANSITION_ENTER)
                         transition = "ENTER";
@@ -148,13 +152,24 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
                     JobScheduler jobScheduler =
                             (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
                     jobScheduler.schedule(
-                            new JobInfo.Builder(1, new ComponentName(context, TransitionJobService.class))
+                            new JobInfo.Builder(
+                                    buildTransitionJobId(geoNotification.id, transitionType, bundle.getString("date")),
+                                    new ComponentName(context, TransitionJobService.class)
+                            )
                                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                                     .setExtras(bundle)
                                     .build()
                     );
                 }
             }
+        }
+
+        private int buildTransitionJobId(String geofenceId, int transitionType, String timestamp) {
+            int hash = (geofenceId + ":" + transitionType + ":" + timestamp).hashCode();
+            if (hash == Integer.MIN_VALUE) {
+                hash = 0;
+            }
+            return TRANSITION_JOB_ID_BASE + (Math.abs(hash) % 1000000000);
         }
 
     }
@@ -171,3 +186,4 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
     }
 
 }
+    private static final int TRANSITION_JOB_ID_BASE = 41000;

@@ -53,6 +53,27 @@ assert(
   'iOS location updates must guard against empty Core Location updates and use latest location'
 );
 
+assert(
+  iosSource.includes('forwardedNotificationDelegate = notificationCenter.delegate'),
+  'iOS must preserve any existing UNUserNotificationCenter delegate before installing plugin delegate'
+);
+assert(
+  iosSource.includes('forwarded.userNotificationCenter?(center, willPresent: notification)'),
+  'iOS notification delegate must forward willPresent callbacks to existing delegate'
+);
+assert(
+  iosSource.includes('forwarded.userNotificationCenter?(center, didReceive: response)'),
+  'iOS notification delegate must forward didReceive callbacks to existing delegate'
+);
+assert(
+  iosSource.includes('func isAllowedCallbackUrl(_ url: URL) -> Bool'),
+  'iOS transition callback URLs must be validated against transport policy'
+);
+assert(
+  iosSource.includes('IOSSecureAuthorizationStore'),
+  'iOS authorization headers must be stored in keychain-backed secure storage'
+);
+
 function schedulePendingExit(now, debounceSeconds, existingDeadline) {
   let pendingExitAt = now + debounceSeconds;
   if (typeof existingDeadline === 'number' && existingDeadline > now) {
