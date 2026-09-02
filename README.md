@@ -16,7 +16,7 @@ Check out our example applications:
 
 From master
 ```
-cordova plugin add https://github.com/cowbell/cordova-plugin-geofence
+cordova plugin add https://github.com/tgptom/cordova-plugin-geofence
 ```
 
 Latest stable version
@@ -36,10 +36,7 @@ cordova plugin rm cordova-plugin-geofence
 ## Supported Platforms
 
 - Android
-- iOS >=7.0
-- Windows Phone 8.1
-    - using Universal App (cordova windows platform)
-    - using Silverlight App (cordova wp8 platform retargeted to WP 8.1)
+- iOS
 
 ## Known Limitations
 
@@ -137,22 +134,6 @@ If you don't pass the variable, the plugin will add a default string as value.
 
 Using geofencing/background location requires app-level disclosures and permission prompts that match your real behavior (for example purpose strings, privacy policy, and store data-safety/privacy declarations). This plugin cannot guarantee Apple App Store or Google Play approval by itself.
 
-## Windows phone 8.1
-
-Plugin can be used with both windows phone 8.1 type projects Univeral App, Silverlight App.
-
-In order to use toast notifications you have to enable this feature in appxmanifest file either using UI in Visual Studio or edit file setting attribute **ToastCapable="true"** in **m3:VisualElements** node under Package/Applications/Application.
-
-If you are retargeting WP 8.0 to WP 8.1 you need to register background task to perform geofence notifications. Register it via UI in Visual Studio or add following code under Package/Applications/Application/Extensions
-
-```xml
-<Extension Category="windows.backgroundTasks" EntryPoint="GeofenceComponent.GeofenceTrigger">
-    <BackgroundTasks>
-        <m2:Task Type="location" />
-    </BackgroundTasks>
-</Extension>
-```
-
 # Using the plugin
 
 Cordova initialize plugin to `window.geofence` object.
@@ -177,7 +158,7 @@ For listening of geofence transistion you can override onTransitionReceived meth
 - `TransitionType.ENTER` = 1
 - `TransitionType.EXIT` = 2
 - `TransitionType.BOTH` = 3
-- `TransitionType.DWELL` = 4
+- `TransitionType.DWELL` = 4 (Android only; iOS rejects DWELL because Core Location region monitoring only supports ENTER/EXIT)
 
 ## Error Codes
 
@@ -213,8 +194,9 @@ document.addEventListener('deviceready', function () {
 }, false);
 ```
 
-Initialization process is responsible for requesting necessary permissions (including Always Location when required by your app flow).
-If required permissions are not granted then initialization fails with error message.
+Initialization requests foreground location first, then background location. On Android 11+ the plugin opens app settings so the user can choose "Allow all the time", then re-checks on return.
+On Android 13+, notification permission is requested but optional for geofence monitoring. Denial does not fail initialization.
+If foreground precise location (`ACCESS_FINE_LOCATION`) is not granted, Android initialization fails because approximate-only permission is not sufficient for reliable geofence behavior.
 
 ## Adding new geofence to monitor
 
@@ -227,6 +209,7 @@ window.geofence.addOrUpdate({
     transitionType: Number,         // Type of transition 1 - Enter, 2 - Exit, 3 - Both
     startTime:      Date,           // (Optional) JavaScript Date object for when the geofence should become enabled (iOS and Android only)
     endTime:        Date,           // (Optional) JavaScript Date object for when the geofence should become disabled (iOS and Android only)
+    allowInsecureHttp: Boolean,     // (Optional, Android only) default false. Must be true to allow http:// callback URLs during local development.
     notification: {                 // Notification object
         id:             Number,     // (Optional) should be integer, id of notification
         title:          String,     // Title of notification
@@ -285,8 +268,6 @@ notification: {
 Fully working only on Android.
 
 On iOS vibration pattern doesn't work. Plugin only allow to vibrate with default system pattern.
-
-Windows Phone - current status is TODO
 
 ## Notification icons
 
@@ -408,14 +389,15 @@ window.geofence.addOrUpdate({
 
 ## Installation
 
-- git clone https://github.com/cowbell/cordova-plugin-geofence
+- git clone https://github.com/tgptom/cordova-plugin-geofence
 - change into the new directory
 - `npm install`
 
 ## Running tests
 
-- Start emulator
-- `cordova-paramedic --platform android --plugin .`
+- `npm test` (lint + JS/static contract checks)
+- `npm run test:android`
+- `npm run test:ios`
 
 ### Testing on iOS
 

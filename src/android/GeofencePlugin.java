@@ -3,6 +3,11 @@ package com.cowbell.cordova.geofence;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
 import android.util.Log;
 import android.Manifest;
 import android.app.NotificationManager;
@@ -35,9 +40,12 @@ public class GeofencePlugin extends CordovaPlugin {
     private static final int REQUEST_FOREGROUND_LOCATION = 2001;
     private static final int REQUEST_BACKGROUND_LOCATION = 2002;
     private static final int REQUEST_NOTIFICATION_PERMISSION = 2003;
+    private static final int REQUEST_BACKGROUND_LOCATION_SETTINGS = 2004;
     private static final String STAGE_FOREGROUND_LOCATION = "foreground_location";
     private static final String STAGE_BACKGROUND_LOCATION = "background_location";
+    private static final String STAGE_BACKGROUND_LOCATION_SETTINGS = "background_location_settings";
     private static final String STAGE_NOTIFICATIONS = "notifications";
+    private static final long INITIALIZE_PERMISSION_TIMEOUT_MS = 120000L;
 
     private static HashMap<String, Long> snoozedFences = new HashMap<>();
 
@@ -60,7 +68,31 @@ public class GeofencePlugin extends CordovaPlugin {
 
     private final Object permissionRequestMutex = new Object();
     private final List<CallbackContext> pendingInitializeCallbacks = new CopyOnWriteArrayList<>();
+    private final Handler permissionFlowHandler = new Handler(Looper.getMainLooper());
+    private final Runnable initializeTimeoutRunnable = new Runnable() {
+        @Override
+        public void run() {
+            synchronized (permissionRequestMutex) {
+                if (!isPermissionRequestInFlight || isPluginDestroyed) {
+                    return;
+                }
+            }
+            failPendingInitializeCallbacks(buildPermissionError(
+                ERROR_PERMISSION_DENIED,
+                "Initialization timed out while waiting for user permission action",
+                activePermissionStage,
+                null,
+                "INITIALIZE_TIMEOUT",
+                activePermissionRequestCode
+            ));
+        }
+    };
     private boolean isPermissionRequestInFlight = false;
+    private String activePermissionStage = null;
+    private int activePermissionRequestCode = -1;
+    private boolean awaitingBackgroundLocationSettings = false;
+    private boolean notificationPermissionStageCompleted = false;
+    private final List<String> initializeWarnings = new CopyOnWriteArrayList<>();
     private volatile boolean isPluginDestroyed = false;
 
     /**
@@ -141,6 +173,7 @@ public class GeofencePlugin extends CordovaPlugin {
     @Override
     public void onDestroy() {
         isPluginDestroyed = true;
+        permissionFlowHandler.removeCallbacks(initializeTimeoutRunnable);
         failPendingInitializeCallbacks(buildPermissionError(
             ERROR_UNKNOWN,
             "Plugin destroyed before initialization completed",
@@ -212,8 +245,8 @@ public class GeofencePlugin extends CordovaPlugin {
             return;
         }
 
-        if (hasAllInitializePermissions()) {
-            callbackContext.success();
+        if (hasAllRequiredInitializePermissions()) {
+            callbackContext.success(buildInitializeStatus(null));
             return;
         }
 
@@ -222,6 +255,9 @@ public class GeofencePlugin extends CordovaPlugin {
         synchronized (permissionRequestMutex) {
             if (!isPermissionRequestInFlight) {
                 isPermissionRequestInFlight = true;
+                initializeWarnings.clear();
+                notificationPermissionStageCompleted = false;
+                scheduleInitializeTimeout();
                 shouldStartPermissionFlow = true;
             }
         }
@@ -252,7 +288,7 @@ public class GeofencePlugin extends CordovaPlugin {
     }
 
     private boolean requiresBackgroundLocationPermission() {
-        return android.os.Build.VERSION.SDK_INT > 28;
+        return Build.VERSION.SDK_INT > 28;
     }
 
     private boolean hasBackgroundLocationPermissionIfRequired() {
@@ -261,7 +297,7 @@ public class GeofencePlugin extends CordovaPlugin {
     }
 
     private boolean requiresNotificationPermission() {
-        return android.os.Build.VERSION.SDK_INT >= 33;
+        return Build.VERSION.SDK_INT >= 33;
     }
 
     private boolean hasNotificationPermissionIfRequired() {
@@ -269,10 +305,9 @@ public class GeofencePlugin extends CordovaPlugin {
             || PermissionHelper.hasPermission(this, Manifest.permission.POST_NOTIFICATIONS);
     }
 
-    private boolean hasAllInitializePermissions() {
+    private boolean hasAllRequiredInitializePermissions() {
         return hasForegroundLocationPermissions()
-            && hasBackgroundLocationPermissionIfRequired()
-            && hasNotificationPermissionIfRequired();
+            && hasBackgroundLocationPermissionIfRequired();
     }
 
     private void requestNextInitializePermissionStage() {
@@ -289,8 +324,8 @@ public class GeofencePlugin extends CordovaPlugin {
         }
 
         if (!hasForegroundLocationPermissions()) {
-            PermissionHelper.requestPermissions(
-                this,
+            requestPermissionStage(
+                STAGE_FOREGROUND_LOCATION,
                 REQUEST_FOREGROUND_LOCATION,
                 new String[] {
                     Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -302,25 +337,30 @@ public class GeofencePlugin extends CordovaPlugin {
 
         if (requiresBackgroundLocationPermission()
             && !PermissionHelper.hasPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
-            PermissionHelper.requestPermissions(
-                this,
-                REQUEST_BACKGROUND_LOCATION,
-                new String[] { Manifest.permission.ACCESS_BACKGROUND_LOCATION }
-            );
+            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+                requestPermissionStage(
+                    STAGE_BACKGROUND_LOCATION,
+                    REQUEST_BACKGROUND_LOCATION,
+                    new String[] { Manifest.permission.ACCESS_BACKGROUND_LOCATION }
+                );
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                openBackgroundLocationSettings();
+            }
             return;
         }
 
         if (requiresNotificationPermission()
+            && !notificationPermissionStageCompleted
             && !PermissionHelper.hasPermission(this, Manifest.permission.POST_NOTIFICATIONS)) {
-            PermissionHelper.requestPermissions(
-                this,
+            requestPermissionStage(
+                STAGE_NOTIFICATIONS,
                 REQUEST_NOTIFICATION_PERMISSION,
                 new String[] { Manifest.permission.POST_NOTIFICATIONS }
             );
             return;
         }
 
-        succeedPendingInitializeCallbacks();
+        succeedPendingInitializeCallbacks(buildInitializeStatus(null));
     }
 
     private boolean isPermissionFlowRequestCode(int requestCode) {
@@ -412,6 +452,21 @@ public class GeofencePlugin extends CordovaPlugin {
         }
 
         if (!deniedPermissions.isEmpty()) {
+            if (STAGE_NOTIFICATIONS.equals(stage)) {
+                initializeWarnings.add("Notification permission denied. Geofence monitoring continues, but local notifications may be suppressed.");
+                return null;
+            }
+            if (STAGE_FOREGROUND_LOCATION.equals(stage)
+                && deniedPermissions.contains(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                return buildPermissionError(
+                    ERROR_PERMISSION_DENIED,
+                    "Precise location permission is required for reliable geofencing",
+                    stage,
+                    deniedPermissions,
+                    "PRECISE_LOCATION_REQUIRED",
+                    requestCode
+                );
+            }
             return buildPermissionError(
                 ERROR_PERMISSION_DENIED,
                 "Required permissions not granted",
@@ -443,14 +498,24 @@ public class GeofencePlugin extends CordovaPlugin {
         pendingInitializeCallbacks.clear();
         synchronized (permissionRequestMutex) {
             isPermissionRequestInFlight = false;
+            activePermissionStage = null;
+            activePermissionRequestCode = -1;
+            awaitingBackgroundLocationSettings = false;
+            notificationPermissionStageCompleted = false;
         }
+        initializeWarnings.clear();
+        permissionFlowHandler.removeCallbacks(initializeTimeoutRunnable);
         return callbacks;
     }
 
-    private void succeedPendingInitializeCallbacks() {
+    private void succeedPendingInitializeCallbacks(JSONObject statusObject) {
         List<CallbackContext> callbacks = drainPendingInitializeCallbacks();
         for (CallbackContext callback : callbacks) {
-            callback.success();
+            if (statusObject != null) {
+                callback.success(statusObject);
+            } else {
+                callback.success();
+            }
         }
     }
 
@@ -507,11 +572,22 @@ public class GeofencePlugin extends CordovaPlugin {
                 Log.d(TAG, "Ignoring permission result for completed flow");
                 return;
             }
+            if (requestCode != activePermissionRequestCode) {
+                failPendingInitializeCallbacks(buildPermissionError(
+                    ERROR_UNKNOWN,
+                    "Permission result does not match current permission stage",
+                    activePermissionStage,
+                    null,
+                    "UNEXPECTED_REQUEST_CODE_RESULT",
+                    requestCode
+                ));
+                return;
+            }
         }
 
         JSONObject validationError = validatePermissionResult(
             requestCode,
-            stageForRequestCode(requestCode),
+            activePermissionStage,
             permissions,
             grantResults
         );
@@ -520,8 +596,104 @@ public class GeofencePlugin extends CordovaPlugin {
             failPendingInitializeCallbacks(validationError);
             return;
         }
+        if (STAGE_NOTIFICATIONS.equals(activePermissionStage)) {
+            synchronized (permissionRequestMutex) {
+                notificationPermissionStageCompleted = true;
+            }
+        }
 
         requestNextInitializePermissionStage();
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent intent) {
+        if (requestCode != REQUEST_BACKGROUND_LOCATION_SETTINGS) {
+            super.onActivityResult(requestCode, resultCode, intent);
+            return;
+        }
+        handleBackgroundLocationSettingsReturn("activity_result");
+    }
+
+    @Override
+    public void onResume(boolean multitasking) {
+        super.onResume(multitasking);
+        handleBackgroundLocationSettingsReturn("resume");
+    }
+
+    private void handleBackgroundLocationSettingsReturn(String trigger) {
+        synchronized (permissionRequestMutex) {
+            if (!isPermissionRequestInFlight || !awaitingBackgroundLocationSettings) {
+                return;
+            }
+        }
+
+        if (hasBackgroundLocationPermissionIfRequired()) {
+            synchronized (permissionRequestMutex) {
+                awaitingBackgroundLocationSettings = false;
+                activePermissionStage = null;
+                activePermissionRequestCode = -1;
+            }
+            requestNextInitializePermissionStage();
+            return;
+        }
+
+        failPendingInitializeCallbacks(buildPermissionError(
+            ERROR_PERMISSION_DENIED,
+            "Background location permission must be set to \"Allow all the time\" in app settings",
+            STAGE_BACKGROUND_LOCATION_SETTINGS,
+            null,
+            "BACKGROUND_LOCATION_NOT_GRANTED_IN_SETTINGS",
+            REQUEST_BACKGROUND_LOCATION_SETTINGS
+        ));
+    }
+
+    private void requestPermissionStage(String stage, int requestCode, String[] permissions) {
+        synchronized (permissionRequestMutex) {
+            activePermissionStage = stage;
+            activePermissionRequestCode = requestCode;
+            awaitingBackgroundLocationSettings = false;
+        }
+        scheduleInitializeTimeout();
+        PermissionHelper.requestPermissions(this, requestCode, permissions);
+    }
+
+    private void openBackgroundLocationSettings() {
+        Intent settingsIntent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        settingsIntent.setData(Uri.fromParts("package", cordova.getActivity().getPackageName(), null));
+        settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        synchronized (permissionRequestMutex) {
+            activePermissionStage = STAGE_BACKGROUND_LOCATION_SETTINGS;
+            activePermissionRequestCode = REQUEST_BACKGROUND_LOCATION_SETTINGS;
+            awaitingBackgroundLocationSettings = true;
+        }
+        scheduleInitializeTimeout();
+        cordova.startActivityForResult(this, settingsIntent, REQUEST_BACKGROUND_LOCATION_SETTINGS);
+    }
+
+    private void scheduleInitializeTimeout() {
+        permissionFlowHandler.removeCallbacks(initializeTimeoutRunnable);
+        permissionFlowHandler.postDelayed(initializeTimeoutRunnable, INITIALIZE_PERMISSION_TIMEOUT_MS);
+    }
+
+    private JSONObject buildInitializeStatus(List<String> explicitWarnings) {
+        JSONObject status = new JSONObject();
+        JSONArray warnings = new JSONArray();
+        try {
+            List<String> warningsSource = explicitWarnings != null ? explicitWarnings : initializeWarnings;
+            for (String warning : warningsSource) {
+                warnings.put(warning);
+            }
+            status.put("locationPermissionGranted", hasForegroundLocationPermissions());
+            status.put("backgroundLocationPermissionGranted", hasBackgroundLocationPermissionIfRequired());
+            status.put("notificationPermissionRequired", requiresNotificationPermission());
+            status.put("notificationPermissionGranted", hasNotificationPermissionIfRequired());
+            status.put("preciseLocationRequired", true);
+            status.put("preciseLocationGranted", PermissionHelper.hasPermission(this, Manifest.permission.ACCESS_FINE_LOCATION));
+            status.put("warnings", warnings);
+        } catch (JSONException e) {
+            Log.e(TAG, "Failed to build initialize status object", e);
+        }
+        return status;
     }
 
     private static synchronized void sendJavascript(final String js) {
