@@ -343,6 +343,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     let store = GeoNotificationStore()
     let defaults = UserDefaults.standard
     let operationQueue = DispatchQueue(label: "com.cowbell.cordova.geofence.GeoNotificationManagerQueue")
+    weak var previousNotificationDelegate: UNUserNotificationCenterDelegate?
     private(set) var alwaysAuthorizationRequestCount = 0
     var snoozedFences = [String : Double]()
     var isActive = false
@@ -367,7 +368,12 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
         performOnLocationManagerThread {
             self.locationManager.delegate = self
         }
-        UNUserNotificationCenter.current().delegate = self
+        let center = UNUserNotificationCenter.current()
+        previousNotificationDelegate = center.delegate
+        if previousNotificationDelegate === self {
+            previousNotificationDelegate = nil
+        }
+        center.delegate = self
     }
     
     func registerPermissions() {
@@ -467,11 +473,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             let transitionType = geo["transitionType"].intValue
             if transitionType != GeofenceTransitionEnter &&
                 transitionType != GeofenceTransitionExit &&
-                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit) &&
-                transitionType != GeofenceTransitionDwell &&
-                transitionType != (GeofenceTransitionEnter | GeofenceTransitionDwell) &&
-                transitionType != (GeofenceTransitionExit | GeofenceTransitionDwell) &&
-                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit | GeofenceTransitionDwell) {
+                transitionType != (GeofenceTransitionEnter | GeofenceTransitionExit) {
                 throw NSError(domain: TAG, code: 1, userInfo: [NSLocalizedDescriptionKey: "Unsupported transitionType for id \(id)"])
             }
 
@@ -657,29 +659,11 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
                         }
 
                         let jsonDict = ["geofenceId": geoNotification["id"].stringValue, "transition": transitionName, "date": dateFormatter.string(from: Date())]
-                        let jsonData = try! JSONSerialization.data(withJSONObject: jsonDict, options: [])
-                        
-                        var request = URLRequest(url: url)
-                        request.httpMethod = "post"
-                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                        request.setValue(geoNotification["authorization"].stringValue, forHTTPHeaderField: "Authorization")
-                        request.httpBody = jsonData
-                        
-                        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
-                            if let error = error {
-                                print("error:", error)
-                                return
-                            }
-                            
-                            do {
-                                guard let data = data else { return }
-                                guard let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: AnyObject] else { return }
-                                print("json:", json)
-                            } catch {
-                                print("error:", error)
-                            }
-                        }
-                        task.resume()
+                        postTransitionToServerWithRetry(
+                            url: url,
+                            authorization: geoNotification["authorization"].string,
+                            payload: jsonDict
+                        )
                     } else {
                         log("Invalid callback url for geofence \(id)")
                     }
@@ -870,6 +854,54 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
         pendingExitWorkItem?.cancel()
         pendingExitWorkItem = nil
         defaults.removeObject(forKey: pendingExitAtKey)
+    }
+
+    func postTransitionToServerWithRetry(url: URL, authorization: String?, payload: [String: String], attempt: Int = 1) {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            log("Invalid callback url scheme for transition callback: \(url.absoluteString)")
+            return
+        }
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+            log("Failed to serialize transition callback payload")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let authorization = authorization, !authorization.isEmpty {
+            request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = jsonData
+
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            let shouldRetry = attempt < 3 && (error != nil || (statusCode ?? 500) >= 500)
+
+            if shouldRetry {
+                let retryDelay = Double(1 << (attempt - 1))
+                self.operationQueue.asyncAfter(deadline: .now() + retryDelay) {
+                    self.postTransitionToServerWithRetry(
+                        url: url,
+                        authorization: authorization,
+                        payload: payload,
+                        attempt: attempt + 1
+                    )
+                }
+                return
+            }
+
+            if let error = error {
+                log("Transition callback failed: \(error.localizedDescription)")
+                return
+            }
+
+            if let statusCode = statusCode, statusCode < 200 || statusCode >= 300 {
+                log("Transition callback failed with HTTP \(statusCode)")
+            }
+        }.resume()
     }
     
     func notifyAbout(_ geo: JSON) {
@@ -1082,7 +1114,12 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
                 completionHandler([.alert, .sound])
             }
         } else {
-            completionHandler([])
+            if let delegate = previousNotificationDelegate,
+               delegate.responds(to: #selector(userNotificationCenter(_:willPresent:withCompletionHandler:))) {
+                delegate.userNotificationCenter?(center, willPresent: notification, withCompletionHandler: completionHandler)
+            } else {
+                completionHandler([])
+            }
         }
     }
     
@@ -1090,7 +1127,16 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        
+        if response.notification.request.content.userInfo["geofence.notification.data"] == nil {
+            if let delegate = previousNotificationDelegate,
+               delegate.responds(to: #selector(userNotificationCenter(_:didReceive:withCompletionHandler:))) {
+                delegate.userNotificationCenter?(center, didReceive: response, withCompletionHandler: completionHandler)
+                return
+            }
+            completionHandler()
+            return
+        }
+
         // Determine the user action
         log(response.actionIdentifier)
         switch response.actionIdentifier {

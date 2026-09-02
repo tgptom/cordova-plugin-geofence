@@ -147,16 +147,28 @@ public class ReceiveTransitionsReceiver extends BroadcastReceiver {
 
                     JobScheduler jobScheduler =
                             (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
-                    jobScheduler.schedule(
-                            new JobInfo.Builder(1, new ComponentName(context, TransitionJobService.class))
-                                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                                    .setExtras(bundle)
-                                    .build()
-                    );
+                    if (jobScheduler != null) {
+                        int jobId = buildTransitionJobId(geoNotification.id, transition, date);
+                        jobScheduler.schedule(
+                                new JobInfo.Builder(jobId, new ComponentName(context, TransitionJobService.class))
+                                        .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                                        .setExtras(bundle)
+                                        .build()
+                        );
+                    }
                 }
             }
         }
 
+    }
+
+    private int buildTransitionJobId(String geofenceId, String transition, String date) {
+        String key = geofenceId + "|" + transition + "|" + date;
+        int hash = key.hashCode();
+        if (hash == Integer.MIN_VALUE) {
+            hash = 0;
+        }
+        return Math.abs(hash);
     }
 
     private void updateLastTriggeredByNotificationId(int id, List<GeoNotification> geoList) {

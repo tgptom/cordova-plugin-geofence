@@ -36,10 +36,7 @@ cordova plugin rm cordova-plugin-geofence
 ## Supported Platforms
 
 - Android
-- iOS >=7.0
-- Windows Phone 8.1
-    - using Universal App (cordova windows platform)
-    - using Silverlight App (cordova wp8 platform retargeted to WP 8.1)
+- iOS
 
 ## Known Limitations
 
@@ -82,6 +79,9 @@ If the companion plugin is missing or incompatible, geofencing continues to work
 
 This plugin uses Google Play Services so you need to have it installed on your device.
 The geofence transition `PendingIntent` passed to `GeofencingClient.addGeofences()` is mutable on Android 12+ (API 31+) as required by Play Services, while the plugin's internal alarm/navigation `PendingIntent`s remain immutable.
+Initialization requires foreground location permission and (Android 10+) background location permission.
+On Android 11+ the plugin redirects users to the app Settings screen to grant `Allow all the time` because background location cannot be reliably completed in-app.
+On Android 13+ notification permission is optional: geofence monitoring/transition callbacks still initialize when notification permission is denied.
 
 ## iOS
 
@@ -109,16 +109,6 @@ Time-window and delayed-exit reconciliation while iOS is suspended/terminated is
 2. Launch app and wait for plugin eager load (`onload=true`) without calling `geofence.initialize()`: confirm no location permission prompt appears.
 3. Trigger explicit app action that calls `geofence.initialize()`: confirm the app may now request location permission.
 
-:warning: Swift 3 is not supported at the moment, the following preference has to be added in your project :
-
-For Cordova projects
-
-`<preference name="UseLegacySwiftLanguageVersion" value="true" />`
-
-For PhoneGap projects
-
-`<preference name="swift-version" value="2.3" />`
-
 ### iOS Quirks
 
 Since iOS 10 it's mandatory to add a `NSLocationAlwaysUsageDescription` and `NSLocationWhenInUseUsageDescription` entries in the info.plist.
@@ -136,22 +126,6 @@ If you don't pass the variable, the plugin will add a default string as value.
 ### App submission responsibilities
 
 Using geofencing/background location requires app-level disclosures and permission prompts that match your real behavior (for example purpose strings, privacy policy, and store data-safety/privacy declarations). This plugin cannot guarantee Apple App Store or Google Play approval by itself.
-
-## Windows phone 8.1
-
-Plugin can be used with both windows phone 8.1 type projects Univeral App, Silverlight App.
-
-In order to use toast notifications you have to enable this feature in appxmanifest file either using UI in Visual Studio or edit file setting attribute **ToastCapable="true"** in **m3:VisualElements** node under Package/Applications/Application.
-
-If you are retargeting WP 8.0 to WP 8.1 you need to register background task to perform geofence notifications. Register it via UI in Visual Studio or add following code under Package/Applications/Application/Extensions
-
-```xml
-<Extension Category="windows.backgroundTasks" EntryPoint="GeofenceComponent.GeofenceTrigger">
-    <BackgroundTasks>
-        <m2:Task Type="location" />
-    </BackgroundTasks>
-</Extension>
-```
 
 # Using the plugin
 
@@ -177,7 +151,7 @@ For listening of geofence transistion you can override onTransitionReceived meth
 - `TransitionType.ENTER` = 1
 - `TransitionType.EXIT` = 2
 - `TransitionType.BOTH` = 3
-- `TransitionType.DWELL` = 4
+- `TransitionType.DWELL` = 4 (Android only)
 
 ## Error Codes
 
@@ -224,7 +198,7 @@ window.geofence.addOrUpdate({
     latitude:       Number,         // Geo latitude of geofence
     longitude:      Number,         // Geo longitude of geofence
     radius:         Number,         // Radius of geofence in meters
-    transitionType: Number,         // Type of transition 1 - Enter, 2 - Exit, 3 - Both
+    transitionType: Number,         // Type of transition 1 - Enter, 2 - Exit, 3 - Both (DWELL is Android-only)
     startTime:      Date,           // (Optional) JavaScript Date object for when the geofence should become enabled (iOS and Android only)
     endTime:        Date,           // (Optional) JavaScript Date object for when the geofence should become disabled (iOS and Android only)
     notification: {                 // Notification object
@@ -414,16 +388,15 @@ window.geofence.addOrUpdate({
 
 ## Running tests
 
-- Start emulator
-- `cordova-paramedic --platform android --plugin .`
+- `npm test`
 
 ### Testing on iOS
 
-Before you run `cordova-paramedic` install `npm install -g ios-sim`
+Use your app/device workflow to validate native Core Location behavior and permission prompts.
 
 ### Troubleshooting
 
-Add `--verbose` at the end of `cordova-paramedic` command.
+Review CI logs from the GitHub Actions workflow.
 
 ## License
 

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<plugin xmlns="http://www.phonegap.com/ns/plugins/1.0" xmlns:m2="http://schemas.microsoft.com/appx/2013/manifest" xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" id="cordova-plugin-geofence" version="0.8.1">
+<plugin xmlns="http://www.phonegap.com/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" id="cordova-plugin-geofence" version="0.8.1">
     <name>geofence</name>
     <description>Geofence plugin</description>
     <license>Apache 2.0</license>
@@ -8,6 +8,7 @@
     <issue>https://github.com/cowbell/cordova-plugin-geofence/issues</issue>
     <engines>
         <engine name="cordova" version=">=12.0.0" />
+        <engine name="cordova-android" version=">=12.0.0" />
         <engine name="cordova-ios" version=">=8.0.0" />
     </engines>
 
@@ -87,40 +88,6 @@
         </config-file>
 
     </platform>
-    <!-- wp8 -->
-    <platform name="wp8">
-        <config-file target="Properties/WMAppManifest.xml" parent="/Deployment/App/Capabilities">
-            <Capability Name="ID_CAP_LOCATION" />
-        </config-file>
-        <config-file target="config.xml" parent="/*">
-            <feature name="GeofencePlugin">
-                <param name="wp-package" value="GeofencePlugin" />
-            </feature>
-        </config-file>
-        <framework src="src/wp8/libs/Newtonsoft.Json.dll" custom="true" />
-        <framework src="src/wp8/GeofenceComponent.winmd" custom="true" />
-        <source-file src="src/wp8/GeofencePlugin.cs" />
-    </platform>
-
-    <!-- windows -->
-    <platform name="windows">
-        <config-file target="package.appxmanifest" parent="/Package/Capabilities">
-            <DeviceCapability Name="location" />
-        </config-file>
-        <config-file target="package.appxmanifest" parent="/Package/Applications/Application/Extensions">
-            <Extension Category="windows.backgroundTasks" EntryPoint="GeofenceComponent.GeofenceTrigger">
-                <BackgroundTasks>
-                    <m2:Task Type="location" />
-                </BackgroundTasks>
-            </Extension>
-        </config-file>
-        <framework src="src/windows/libs/Newtonsoft.Json.dll" custom="true" />
-        <framework src="src/windows/GeofenceComponent.winmd" custom="true" />
-        <js-module src="src/windows/GeofenceProxy.js" name="GeofenceProxy">
-            <runs />
-        </js-module>
-    </platform>
-
     <!-- ios -->
     <platform name="ios">
         <preference name="GEOFENCE_ALWAYS_USAGE_DESCRIPTION" default="${EXECUTABLE_NAME} would like to use your location to determine proximity to walks and points of interest." />

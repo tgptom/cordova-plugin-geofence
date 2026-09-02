@@ -46,8 +46,7 @@ public abstract class AbstractGoogleServiceCommand implements
         connectionInProgress = false;
         logger.log(Log.DEBUG, "Connecting to google services fail - "
                 + connectionResult.toString());
-
-        // TODO: invoke CommandExucuted with ERROR
+        CommandExecuted(new RuntimeException("Google Play services connection failed: " + connectionResult));
     }
 
     @Override

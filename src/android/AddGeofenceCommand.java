@@ -65,14 +65,10 @@ public class AddGeofenceCommand extends AbstractGoogleServiceCommand {
                                             + " message: " + e.getMessage();
                                     JSONObject error = new JSONObject();
                                     error.put("message", message);
-
-    //                                if (statusCode == GeofenceStatusCodes.GEOFENCE_NOT_AVAILABLE) {
-    //                                    error.put("code", GeofencePlugin.ERROR_GEOFENCE_NOT_AVAILABLE);
-    //                                } else if (statusCode == GeofenceStatusCodes.GEOFENCE_TOO_MANY_GEOFENCES) {
-    //                                    error.put("code", GeofencePlugin.ERROR_GEOFENCE_LIMIT_EXCEEDED);
-    //                                } else {
-    //                                    error.put("code", GeofencePlugin.ERROR_UNKNOWN);
-    //                                }
+                                    String code = errorCodeMap.containsKey(statusCode)
+                                            ? errorCodeMap.get(statusCode)
+                                            : GeofencePlugin.ERROR_UNKNOWN;
+                                    error.put("code", code);
 
                                     logger.log(Log.ERROR, message);
                                     CommandExecuted(error);

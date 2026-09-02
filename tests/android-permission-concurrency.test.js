@@ -28,7 +28,7 @@ assert(
 
 assert(
   source.includes('REQUEST_NOTIFICATION_PERMISSION'),
-  'Android plugin must use a dedicated request code for notification stage'
+  'Android plugin keeps a dedicated request code for optional notification stage interoperability'
 );
 
 assert(
@@ -46,7 +46,6 @@ function createFlowHarness(options) {
 
   const REQUEST_FOREGROUND_LOCATION = 2001;
   const REQUEST_BACKGROUND_LOCATION = 2002;
-  const REQUEST_NOTIFICATION_PERMISSION = 2003;
 
   const queue = [];
   const callbackSettlements = [];
@@ -77,10 +76,6 @@ function createFlowHarness(options) {
     }
     if (cfg.sdk > 28 && !state.background) {
       state.requests.push(REQUEST_BACKGROUND_LOCATION);
-      return;
-    }
-    if (cfg.sdk >= 33 && !state.notifications) {
-      state.requests.push(REQUEST_NOTIFICATION_PERMISSION);
       return;
     }
     settleQueue({ ok: true });
@@ -118,8 +113,6 @@ function createFlowHarness(options) {
         state.foreground = true;
       } else if (requestCode === REQUEST_BACKGROUND_LOCATION) {
         state.background = true;
-      } else if (requestCode === REQUEST_NOTIFICATION_PERMISSION) {
-        state.notifications = true;
       } else {
         return;
       }
@@ -145,12 +138,10 @@ function createFlowHarness(options) {
   );
   flow.onPermissionResult(2002, ['granted']);
   assert.deepStrictEqual(
-    flow.state.requests,
-    [2001, 2002, 2003],
-    'Notification permission must be requested as a separate final stage on Android 13+'
+    flow.callbackSettlements,
+    [{ ok: true }],
+    'Initialize must settle successfully once required location permissions are granted'
   );
-  flow.onPermissionResult(2003, ['granted']);
-  assert.deepStrictEqual(flow.callbackSettlements, [{ ok: true }]);
 }
 
 {
@@ -164,7 +155,6 @@ function createFlowHarness(options) {
   );
   flow.onPermissionResult(2001, ['granted', 'granted']);
   flow.onPermissionResult(2002, ['granted']);
-  flow.onPermissionResult(2003, ['granted']);
   assert.strictEqual(callbackA.settled, true, 'First initialize callback must settle');
   assert.strictEqual(callbackB.settled, true, 'Second initialize callback must settle');
   assert.strictEqual(flow.callbackSettlements.length, 2, 'All queued initialize callbacks must settle exactly once');

@@ -12,6 +12,9 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+
+import org.json.JSONObject;
 
 /**
  * Created by jupe on 22-02-18.
@@ -50,30 +53,46 @@ public class TransitionJobService extends JobService {
 
     private void sendTransitionToServer(String urlString, String authorization, String id, String transition, String date) throws Exception {
         URL url = new URL(urlString);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setReadTimeout(10000);
-        conn.setConnectTimeout(15000);
-        conn.setRequestMethod("POST");
-        conn.setDoInput(true);
-        conn.setDoOutput(true);
-
-        if (authorization != null) {
-            conn.setRequestProperty("Authorization", authorization);
+        String protocol = url.getProtocol();
+        if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+            throw new IllegalArgumentException("Unsupported transition callback protocol: " + protocol);
         }
-        conn.setRequestProperty("Content-Type", "application/json");
 
-        OutputStream os = conn.getOutputStream();
-        BufferedWriter writer = new BufferedWriter(
-                new OutputStreamWriter(os, "UTF-8"));
-        String json = "{ \"geofenceId\": \"" + id + "\",  \"transition\": \"" + transition + "\", \"date\": \"" + date +"\" }";
-        Log.i(GeofencePlugin.TAG, "Sending Geofence transition to server: " + json);
-        writer.write(json);
-        writer.flush();
-        writer.close();
-        os.close();
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        try {
+            conn.setReadTimeout(10000);
+            conn.setConnectTimeout(15000);
+            conn.setRequestMethod("POST");
+            conn.setDoInput(true);
+            conn.setDoOutput(true);
 
-        conn.connect();
-        int responseCode = conn.getResponseCode();
-        Log.i(GeofencePlugin.TAG, "Send Geofence transition to server: " + responseCode);
+            if (authorization != null) {
+                conn.setRequestProperty("Authorization", authorization);
+            }
+            conn.setRequestProperty("Content-Type", "application/json");
+
+            JSONObject payload = new JSONObject();
+            payload.put("geofenceId", id);
+            payload.put("transition", transition);
+            payload.put("date", date);
+            String json = payload.toString();
+            Log.i(GeofencePlugin.TAG, "Sending Geofence transition to server: " + json);
+
+            try (OutputStream os = conn.getOutputStream();
+                 BufferedWriter writer = new BufferedWriter(
+                         new OutputStreamWriter(os, StandardCharsets.UTF_8))) {
+                writer.write(json);
+                writer.flush();
+            }
+
+            conn.connect();
+            int responseCode = conn.getResponseCode();
+            Log.i(GeofencePlugin.TAG, "Send Geofence transition to server: " + responseCode);
+            if (responseCode < 200 || responseCode >= 300) {
+                throw new IllegalStateException("Transition callback failed with HTTP " + responseCode);
+            }
+        } finally {
+            conn.disconnect();
+        }
     }
 }

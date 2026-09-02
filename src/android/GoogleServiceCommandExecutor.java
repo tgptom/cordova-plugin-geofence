@@ -6,17 +6,22 @@ import java.util.Queue;
 public class GoogleServiceCommandExecutor implements IGoogleServiceCommandListener {
     private Queue<AbstractGoogleServiceCommand> commandsToExecute;
     private boolean isExecuting = false;
+    private final Object lock = new Object();
 
     public GoogleServiceCommandExecutor() {
         commandsToExecute = new LinkedList<AbstractGoogleServiceCommand>();
     }
 
     public void QueueToExecute(AbstractGoogleServiceCommand command) {
-        commandsToExecute.add(command);
-        if (!isExecuting) ExecuteNext();
+        synchronized (lock) {
+            commandsToExecute.add(command);
+            if (!isExecuting) {
+                ExecuteNextLocked();
+            }
+        }
     }
 
-    private void ExecuteNext() {
+    private void ExecuteNextLocked() {
         if (commandsToExecute.isEmpty()) return;
         isExecuting = true;
         AbstractGoogleServiceCommand command = commandsToExecute.poll();
@@ -26,7 +31,9 @@ public class GoogleServiceCommandExecutor implements IGoogleServiceCommandListen
 
     @Override
     public void onCommandExecuted(Object error) {
-        isExecuting = false;
-        ExecuteNext();
+        synchronized (lock) {
+            isExecuting = false;
+            ExecuteNextLocked();
+        }
     }
 }

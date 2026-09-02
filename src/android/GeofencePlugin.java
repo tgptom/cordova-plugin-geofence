@@ -3,6 +3,9 @@ package com.cowbell.cordova.geofence;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.ActivityNotFoundException;
+import android.net.Uri;
+import android.provider.Settings;
 import android.util.Log;
 import android.Manifest;
 import android.app.NotificationManager;
@@ -61,6 +64,7 @@ public class GeofencePlugin extends CordovaPlugin {
     private final Object permissionRequestMutex = new Object();
     private final List<CallbackContext> pendingInitializeCallbacks = new CopyOnWriteArrayList<>();
     private boolean isPermissionRequestInFlight = false;
+    private boolean awaitingBackgroundLocationSettingsResult = false;
     private volatile boolean isPluginDestroyed = false;
 
     /**
@@ -271,8 +275,7 @@ public class GeofencePlugin extends CordovaPlugin {
 
     private boolean hasAllInitializePermissions() {
         return hasForegroundLocationPermissions()
-            && hasBackgroundLocationPermissionIfRequired()
-            && hasNotificationPermissionIfRequired();
+            && hasBackgroundLocationPermissionIfRequired();
     }
 
     private void requestNextInitializePermissionStage() {
@@ -302,20 +305,14 @@ public class GeofencePlugin extends CordovaPlugin {
 
         if (requiresBackgroundLocationPermission()
             && !PermissionHelper.hasPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                openAppBackgroundLocationSettings();
+                return;
+            }
             PermissionHelper.requestPermissions(
                 this,
                 REQUEST_BACKGROUND_LOCATION,
                 new String[] { Manifest.permission.ACCESS_BACKGROUND_LOCATION }
-            );
-            return;
-        }
-
-        if (requiresNotificationPermission()
-            && !PermissionHelper.hasPermission(this, Manifest.permission.POST_NOTIFICATIONS)) {
-            PermissionHelper.requestPermissions(
-                this,
-                REQUEST_NOTIFICATION_PERMISSION,
-                new String[] { Manifest.permission.POST_NOTIFICATIONS }
             );
             return;
         }
@@ -516,12 +513,90 @@ public class GeofencePlugin extends CordovaPlugin {
             grantResults
         );
         if (validationError != null) {
+            if (requestCode == REQUEST_NOTIFICATION_PERMISSION
+                && ERROR_PERMISSION_DENIED.equals(validationError.optString("code"))) {
+                Log.d(TAG, "Notification permission denied; continuing initialization");
+                succeedPendingInitializeCallbacks();
+                return;
+            }
             Log.d(TAG, "Permission stage failed");
             failPendingInitializeCallbacks(validationError);
             return;
         }
 
         requestNextInitializePermissionStage();
+    }
+
+    private void openAppBackgroundLocationSettings() {
+        if (cordova == null || cordova.getActivity() == null) {
+            failPendingInitializeCallbacks(buildPermissionError(
+                ERROR_UNKNOWN,
+                "Unable to open settings for background location permission",
+                STAGE_BACKGROUND_LOCATION,
+                null,
+                "ACTIVITY_UNAVAILABLE",
+                REQUEST_BACKGROUND_LOCATION
+            ));
+            return;
+        }
+
+        awaitingBackgroundLocationSettingsResult = true;
+        final String packageName = cordova.getActivity().getPackageName();
+        cordova.getActivity().runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    intent.setData(Uri.fromParts("package", packageName, null));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    cordova.getActivity().startActivity(intent);
+                } catch (ActivityNotFoundException error) {
+                    awaitingBackgroundLocationSettingsResult = false;
+                    List<String> deniedPermissions = new ArrayList<String>();
+                    deniedPermissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
+                    failPendingInitializeCallbacks(buildPermissionError(
+                        ERROR_PERMISSION_DENIED,
+                        "Unable to open settings for background location permission",
+                        STAGE_BACKGROUND_LOCATION,
+                        deniedPermissions,
+                        "SETTINGS_ACTIVITY_UNAVAILABLE",
+                        REQUEST_BACKGROUND_LOCATION
+                    ));
+                }
+            }
+        });
+    }
+
+    @Override
+    public void onResume(boolean multitasking) {
+        super.onResume(multitasking);
+        if (!awaitingBackgroundLocationSettingsResult) {
+            return;
+        }
+
+        awaitingBackgroundLocationSettingsResult = false;
+
+        synchronized (permissionRequestMutex) {
+            if (!isPermissionRequestInFlight) {
+                return;
+            }
+        }
+
+        if (hasBackgroundLocationPermissionIfRequired()) {
+            requestNextInitializePermissionStage();
+            return;
+        }
+
+        List<String> deniedPermissions = new ArrayList<String>();
+        deniedPermissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
+        failPendingInitializeCallbacks(buildPermissionError(
+            ERROR_PERMISSION_DENIED,
+            "Background location permission must be granted in app settings on Android 11+",
+            STAGE_BACKGROUND_LOCATION,
+            deniedPermissions,
+            "BACKGROUND_LOCATION_SETTINGS_REQUIRED",
+            REQUEST_BACKGROUND_LOCATION
+        ));
     }
 
     private static synchronized void sendJavascript(final String js) {
