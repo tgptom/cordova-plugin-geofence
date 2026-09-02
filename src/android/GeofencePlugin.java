@@ -23,6 +23,7 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class GeofencePlugin extends CordovaPlugin {
     public static final String TAG = "GeofencePlugin";
@@ -51,8 +52,9 @@ public class GeofencePlugin extends CordovaPlugin {
         }
     }
 
-    //FIXME: what about many executedActions at once
-    private Action executedAction;
+    private final Object permissionRequestMutex = new Object();
+    private final List<CallbackContext> pendingInitializeCallbacks = new CopyOnWriteArrayList<>();
+    private boolean isPermissionRequestInFlight = false;
 
     /**
      * @param cordova
@@ -80,7 +82,6 @@ public class GeofencePlugin extends CordovaPlugin {
     @Override
     public boolean execute(final String action, final JSONArray args,
                            final CallbackContext callbackContext) throws JSONException {
-        executedAction = new Action(action, args, callbackContext);
         cordova.getThreadPool().execute(new Runnable() {
             public void run() {
                 if (action.equals("addOrUpdate")) {
@@ -185,7 +186,18 @@ public class GeofencePlugin extends CordovaPlugin {
         }
         String[] permissions = permissionList.toArray(new String[0]);
         if (!hasPermissions(permissions)) {
-            PermissionHelper.requestPermissions(this, 0, permissions);
+            pendingInitializeCallbacks.add(callbackContext);
+
+            boolean shouldRequestPermissions = false;
+            synchronized (permissionRequestMutex) {
+                if (!isPermissionRequestInFlight) {
+                    isPermissionRequestInFlight = true;
+                    shouldRequestPermissions = true;
+                }
+            }
+            if (shouldRequestPermissions) {
+                PermissionHelper.requestPermissions(this, 0, permissions);
+            }
         } else {
             callbackContext.success();
         }
@@ -206,21 +218,32 @@ public class GeofencePlugin extends CordovaPlugin {
 
     public void onRequestPermissionResult(int requestCode, String[] permissions,
                                           int[] grantResults) throws JSONException {
-        PluginResult result;
+        List<CallbackContext> callbacks = new ArrayList<CallbackContext>(pendingInitializeCallbacks);
+        pendingInitializeCallbacks.clear();
+        synchronized (permissionRequestMutex) {
+            isPermissionRequestInFlight = false;
+        }
 
-        if (executedAction != null) {
-            for (int r:grantResults) {
-                if (r == PackageManager.PERMISSION_DENIED) {
-                    Log.d(TAG, "Permission Denied!");
-                    result = new PluginResult(PluginResult.Status.ILLEGAL_ACCESS_EXCEPTION);
-                    executedAction.callbackContext.sendPluginResult(result);
-                    executedAction = null;
-                    return;
+        if (callbacks.isEmpty()) {
+            return;
+        }
+
+        for (int r : grantResults) {
+            if (r == PackageManager.PERMISSION_DENIED) {
+                Log.d(TAG, "Permission Denied!");
+                JSONObject errorObject = new JSONObject();
+                errorObject.put("code", ERROR_PERMISSION_DENIED);
+                errorObject.put("message", "Required location permissions not granted");
+                for (CallbackContext callback : callbacks) {
+                    callback.error(errorObject);
                 }
+                return;
             }
-            Log.d(TAG, "Permission Granted!");
-            execute(executedAction);
-            executedAction = null;
+        }
+
+        Log.d(TAG, "Permission Granted!");
+        for (CallbackContext callback : callbacks) {
+            callback.success();
         }
     }
 

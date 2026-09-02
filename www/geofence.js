@@ -169,6 +169,11 @@ module.exports = {
      */
     onNotificationClicked: function (notificationData) {},
     /**
+     * Called when native geofence monitoring fails
+     * @param {Object} error
+     */
+    onMonitoringError: function (error) {},
+    /**
      * Called when app received geofence transition event
      * @param  {Array} geofences
      */

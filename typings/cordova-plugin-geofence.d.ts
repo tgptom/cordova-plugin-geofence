@@ -29,7 +29,7 @@ interface GeofencePlugin {
   ): Promise<any>;
 
   remove(
-    id: number | number[],
+    id: string | number | Array<string | number>,
     successCallback?: (result: any) => void,
     errorCallback?: (error: string) => void
   ): Promise<any>;
@@ -44,9 +44,22 @@ interface GeofencePlugin {
     errorCallback?: (error: string) => void
   ): Promise<string>;
 
+  dismissNotifications(ids: string | number | Array<string | number>): void;
+
+  snooze(id: string | number, duration: number): void;
+
+  ping(
+    successCallback?: (result: any) => void,
+    errorCallback?: (error: string) => void
+  ): Promise<any>;
+
   onTransitionReceived: (geofences: Geofence[]) => void;
+
+  receiveTransition?: (geofences: Geofence[]) => void;
   
   onNotificationClicked: (notificationData: Object) => void;
+
+  onMonitoringError: (error: Object) => void;
 }
 
 interface Geofence {
