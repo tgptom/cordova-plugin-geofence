@@ -320,7 +320,7 @@ class GeofenceFaker {
                 let notify = arc4random_uniform(4)
                 if notify == 0 {
                     log("FAKER notify chosen, need to pick up some region")
-                    var geos = self.geoNotificationManager.getWatchedGeoNotifications()!
+                    let geos = self.geoNotificationManager.getWatchedGeoNotifications()!
                     if geos.count > 0 {
                         //WTF Swift??
                         let index = arc4random_uniform(UInt32(geos.count))
@@ -551,7 +551,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
 
         if !geoNotification["isInside"].isExists() {
             let existingInsideState = store.findById(id)?["isInside"].boolValue ?? false
-            geoNotification["isInside"] = existingInsideState
+            geoNotification["isInside"] = JSON(existingInsideState)
         }
         //store
         store.addOrUpdate(geoNotification)
@@ -1071,7 +1071,7 @@ class GeoNotificationManager : NSObject, CLLocationManagerDelegate, UNUserNotifi
             let wasInside = geoNotification["isInside"].boolValue
             let isInside = state == .inside
             if wasInside != isInside {
-                geoNotification["isInside"] = isInside
+                geoNotification["isInside"] = JSON(isInside)
                 self.store.addOrUpdate(geoNotification)
                 let transitionType = isInside ? GeofenceTransitionEnter : GeofenceTransitionExit
                 self.reconcileTrackingState(triggerTransitionType: transitionType)
