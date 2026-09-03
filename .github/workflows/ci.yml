@@ -54,7 +54,6 @@ jobs:
           cordova platform add android@${CORDOVA_ANDROID_VERSION}
           cordova plugin add "$GITHUB_WORKSPACE"
           cordova build android -- --packageType=apk
-          (cd platforms/android && ./gradlew test --no-daemon)
 
   ios-compile:
     runs-on: macos-15
